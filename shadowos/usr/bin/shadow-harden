@@ -1,0 +1,348 @@
+#!/bin/bash
+#
+# shadow-harden - Privacy Hardening (Mandatory)
+# /usr/bin/shadow-harden
+#
+# Apply security hardening to the running system
+# Privacy and stealth are NOT optional!
+#
+
+set -euo pipefail
+
+VERSION="1.0.0"
+
+log() { echo "[harden] $*"; }
+warn() { echo "[!] $*"; }
+
+# =============================================================================
+# KERNEL HARDENING
+# =============================================================================
+
+harden_kernel() {
+    log "Applying kernel hardening..."
+    
+    # Sysctl settings
+    cat > /etc/sysctl.d/99-shadowos-privacy.conf << 'EOF'
+# ShadowOS Privacy Hardening
+
+# Disable core dumps
+kernel.core_pattern = |/bin/false
+fs.suid_dumpable = 0
+
+# Disable sysrq (magic keys)
+kernel.sysrq = 0
+
+# Restrict dmesg
+kernel.dmesg_restrict = 1
+
+# Restrict kernel pointers
+kernel.kptr_restrict = 2
+
+# Enable ASLR
+kernel.randomize_va_space = 2
+
+# Restrict ptrace
+kernel.yama.ptrace_scope = 2
+
+# Disable kexec
+kernel.kexec_load_disabled = 1
+
+# Network hardening
+net.ipv4.conf.all.rp_filter = 1
+net.ipv4.conf.default.rp_filter = 1
+net.ipv4.conf.all.accept_redirects = 0
+net.ipv4.conf.default.accept_redirects = 0
+net.ipv4.conf.all.send_redirects = 0
+net.ipv4.conf.default.send_redirects = 0
+net.ipv4.icmp_echo_ignore_all = 1
+net.ipv4.tcp_syncookies = 1
+net.ipv6.conf.all.accept_redirects = 0
+net.ipv6.conf.default.accept_redirects = 0
+
+# Disable IPv6 if not needed (reduces attack surface)
+# net.ipv6.conf.all.disable_ipv6 = 1
+EOF
+
+    sysctl --system 2>/dev/null || sysctl -p /etc/sysctl.d/99-shadowos-privacy.conf
+    
+    log "Kernel hardening applied"
+}
+
+# =============================================================================
+# DISABLE SWAP (Cold Boot Attack Prevention)
+# =============================================================================
+
+disable_swap() {
+    log "Disabling swap..."
+    
+    swapoff -a
+    
+    # Remove swap entries from fstab
+    sed -i '/swap/d' /etc/fstab 2>/dev/null || true
+    
+    # Disable zram if present
+    systemctl disable zram-generator 2>/dev/null || true
+    
+    log "Swap disabled"
+}
+
+# =============================================================================
+# DISABLE SHELL HISTORY
+# =============================================================================
+
+disable_history() {
+    log "Disabling shell history..."
+    
+    # Already in shadowos.sh profile, but ensure system-wide
+    cat > /etc/profile.d/00-no-history.sh << 'EOF'
+# Disable history completely
+export HISTSIZE=0
+export HISTFILESIZE=0
+unset HISTFILE
+export LESSHISTFILE=/dev/null
+EOF
+
+    chmod 644 /etc/profile.d/00-no-history.sh
+    
+    log "History disabled"
+}
+
+# =============================================================================
+# DISABLE LOGS
+# =============================================================================
+
+disable_logging() {
+    log "Configuring minimal logging..."
+    
+    # Stop and disable rsyslog
+    systemctl stop rsyslog 2>/dev/null || true
+    systemctl disable rsyslog 2>/dev/null || true
+    
+    # Configure journald for volatile storage only
+    mkdir -p /etc/systemd/journald.conf.d
+    cat > /etc/systemd/journald.conf.d/volatile.conf << 'EOF'
+[Journal]
+Storage=volatile
+RuntimeMaxUse=50M
+RuntimeKeepFree=100M
+EOF
+
+    systemctl restart systemd-journald 2>/dev/null || true
+    
+    log "Logging minimized"
+}
+
+# =============================================================================
+# FIREWALL
+# =============================================================================
+
+setup_firewall() {
+    log "Setting up firewall..."
+    
+    if command -v nft &>/dev/null; then
+        # nftables
+        cat > /etc/nftables.conf << 'EOF'
+#!/usr/sbin/nft -f
+flush ruleset
+
+table inet filter {
+    chain input {
+        type filter hook input priority 0; policy drop;
+        ct state established,related accept
+        iif lo accept
+        # Allow only what's needed
+    }
+    chain forward {
+        type filter hook forward priority 0; policy drop;
+    }
+    chain output {
+        type filter hook output priority 0; policy accept;
+    }
+}
+EOF
+        nft -f /etc/nftables.conf
+        
+    elif command -v iptables &>/dev/null; then
+        # iptables fallback
+        iptables -F
+        iptables -P INPUT DROP
+        iptables -P FORWARD DROP
+        iptables -P OUTPUT ACCEPT
+        iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+        iptables -A INPUT -i lo -j ACCEPT
+    fi
+    
+    log "Firewall configured"
+}
+
+# =============================================================================
+# MAC RANDOMIZATION AT BOOT
+# =============================================================================
+
+enable_mac_randomization() {
+    log "Enabling MAC randomization..."
+    
+    # NetworkManager config
+    mkdir -p /etc/NetworkManager/conf.d
+    cat > /etc/NetworkManager/conf.d/mac-randomization.conf << 'EOF'
+[device]
+wifi.scan-rand-mac-address=yes
+
+[connection]
+wifi.cloned-mac-address=random
+ethernet.cloned-mac-address=random
+EOF
+
+    # Restart NetworkManager if running
+    systemctl restart NetworkManager 2>/dev/null || true
+    
+    log "MAC randomization enabled"
+}
+
+# =============================================================================
+# DISABLE BLUETOOTH (Attack Surface Reduction)
+# =============================================================================
+
+disable_bluetooth() {
+    log "Disabling Bluetooth..."
+    
+    rfkill block bluetooth 2>/dev/null || true
+    systemctl stop bluetooth 2>/dev/null || true
+    systemctl disable bluetooth 2>/dev/null || true
+    
+    # Blacklist module
+    echo "blacklist btusb" > /etc/modprobe.d/disable-bluetooth.conf
+    echo "blacklist bluetooth" >> /etc/modprobe.d/disable-bluetooth.conf
+    
+    log "Bluetooth disabled"
+}
+
+# =============================================================================
+# SECURE DNS
+# =============================================================================
+
+setup_secure_dns() {
+    log "Configuring secure DNS..."
+    
+    # Use DNS over TLS via systemd-resolved
+    mkdir -p /etc/systemd/resolved.conf.d
+    cat > /etc/systemd/resolved.conf.d/privacy.conf << 'EOF'
+[Resolve]
+DNS=1.1.1.1#cloudflare-dns.com 1.0.0.1#cloudflare-dns.com
+DNSOverTLS=yes
+DNSSEC=yes
+Cache=no
+EOF
+
+    systemctl restart systemd-resolved 2>/dev/null || true
+    
+    log "Secure DNS configured"
+}
+
+# =============================================================================
+# FULL HARDENING
+# =============================================================================
+
+full_harden() {
+    log "Applying full privacy hardening..."
+    echo ""
+    
+    harden_kernel
+    disable_swap
+    disable_history
+    disable_logging
+    setup_firewall
+    enable_mac_randomization
+    disable_bluetooth
+    setup_secure_dns
+    
+    echo ""
+    log "Full hardening complete!"
+    echo ""
+    echo "╔═══════════════════════════════════════════════════════════════════════╗"
+    echo "║                  Privacy Hardening Applied                            ║"
+    echo "╠═══════════════════════════════════════════════════════════════════════╣"
+    echo "║  ✓ Kernel hardened (ASLR, no core dumps, no dmesg)                   ║"
+    echo "║  ✓ Swap disabled (cold boot prevention)                              ║"
+    echo "║  ✓ Shell history disabled                                            ║"
+    echo "║  ✓ Logging minimized (RAM only)                                      ║"
+    echo "║  ✓ Firewall enabled (deny by default)                                ║"
+    echo "║  ✓ MAC address randomization enabled                                 ║"
+    echo "║  ✓ Bluetooth disabled                                                ║"
+    echo "║  ✓ DNS over TLS enabled                                              ║"
+    echo "╚═══════════════════════════════════════════════════════════════════════╝"
+}
+
+# =============================================================================
+# STATUS CHECK
+# =============================================================================
+
+check_status() {
+    echo ""
+    echo "╔═══════════════════════════════════════════════════════════════════════╗"
+    echo "║                  Privacy Hardening Status                             ║"
+    echo "╠═══════════════════════════════════════════════════════════════════════╣"
+    
+    # Check each setting
+    local core_dump=$(cat /proc/sys/kernel/core_pattern 2>/dev/null)
+    [[ "$core_dump" == *"/bin/false"* ]] && printf "║  %-67s  ✓ ║\n" "Core dumps disabled" || printf "║  %-67s  ✗ ║\n" "Core dumps enabled"
+    
+    local swap=$(swapon --show 2>/dev/null | wc -l)
+    [[ $swap -eq 0 ]] && printf "║  %-67s  ✓ ║\n" "Swap disabled" || printf "║  %-67s  ✗ ║\n" "Swap enabled"
+    
+    [[ -z "${HISTFILE:-}" ]] && printf "║  %-67s  ✓ ║\n" "Shell history disabled" || printf "║  %-67s  ✗ ║\n" "Shell history may be enabled"
+    
+    pgrep rsyslog &>/dev/null && printf "║  %-67s  ✗ ║\n" "rsyslog running" || printf "║  %-67s  ✓ ║\n" "rsyslog disabled"
+    
+    echo "╚═══════════════════════════════════════════════════════════════════════╝"
+}
+
+# =============================================================================
+# MAIN
+# =============================================================================
+
+show_help() {
+    cat << 'EOF'
+shadow-harden - Privacy Hardening
+
+Apply mandatory privacy and security hardening.
+
+Usage: shadow-harden <command>
+
+Commands:
+  all          Apply full hardening (recommended)
+  kernel       Kernel sysctl hardening only
+  swap         Disable swap only
+  history      Disable shell history only
+  logging      Minimize logging only
+  firewall     Setup firewall only
+  mac          Enable MAC randomization only
+  bluetooth    Disable bluetooth only
+  dns          Setup secure DNS only
+  status       Check hardening status
+
+Example:
+  shadow-harden all
+  shadow-harden status
+EOF
+}
+
+[[ $EUID -ne 0 ]] && [[ "${1:-}" != "status" ]] && {
+    echo "[!] Run as root for full hardening"
+    exit 1
+}
+
+case "${1:-status}" in
+    all|full)       full_harden ;;
+    kernel)         harden_kernel ;;
+    swap)           disable_swap ;;
+    history)        disable_history ;;
+    logging|logs)   disable_logging ;;
+    firewall|fw)    setup_firewall ;;
+    mac)            enable_mac_randomization ;;
+    bluetooth|bt)   disable_bluetooth ;;
+    dns)            setup_secure_dns ;;
+    status|check)   check_status ;;
+    help|-h)        show_help ;;
+    *)              show_help ;;
+esac

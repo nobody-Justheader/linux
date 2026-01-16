@@ -1,0 +1,6 @@
+#!/bin/sh
+# ShadowOS WiFi Daemon runit service
+# /etc/sv/shadow-wifi/run
+
+exec 2>&1
+exec chpst -u root /usr/bin/shadow-wifi-daemon

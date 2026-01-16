@@ -1,0 +1,253 @@
+#!/bin/bash
+#
+# sdelete - ShadowOS Secure Delete
+# /usr/bin/sdelete
+#
+# Drop-in replacement for 'rm' that performs irrecoverable deletion:
+# - Overwrites file content multiple times
+# - Final zero pass to hide shredding
+# - Wipes file name from directory entries
+# - Compatible with standard rm arguments
+#
+
+set -euo pipefail
+
+VERSION="1.0.0"
+
+# =============================================================================
+# CONFIGURATION
+# =============================================================================
+
+# Default overwrite passes (DoD standard = 7)
+DELETE_PASSES="${SHADOWOS_DELETE_PASSES:-7}"
+
+# Add final zero pass
+ZERO_PASS="${SHADOWOS_ZERO_PASS:-true}"
+
+# Silent mode
+QUIET="${SHADOWOS_QUIET:-false}"
+
+# =============================================================================
+# HELPER FUNCTIONS
+# =============================================================================
+
+log() {
+    $QUIET || echo "[sdelete] $*" >&2
+}
+
+error() {
+    echo "[sdelete] ERROR: $*" >&2
+    exit 1
+}
+
+# Securely delete a single file
+delete_file() {
+    local file="$1"
+    local verbose="$2"
+    
+    if [[ ! -e "$file" ]]; then
+        return 0
+    fi
+    
+    if [[ ! -f "$file" ]]; then
+        error "Not a regular file: $file"
+    fi
+    
+    $verbose && log "Wiping: $file ($DELETE_PASSES passes)"
+    
+    if command -v shred &>/dev/null; then
+        local opts="-fun $DELETE_PASSES"
+        $ZERO_PASS && opts="$opts -z"
+        $verbose && opts="$opts -v"
+        
+        shred $opts "$file" 2>&1 | grep -v "^shred:" || true
+    else
+        # Fallback: manual secure delete
+        local size
+        size=$(stat -c%s "$file" 2>/dev/null || echo 0)
+        local blocks=$(( size / 4096 + 1 ))
+        
+        for i in $(seq 1 $DELETE_PASSES); do
+            $verbose && log "  Pass $i/$DELETE_PASSES: random data"
+            dd if=/dev/urandom of="$file" bs=4K count=$blocks conv=notrunc 2>/dev/null
+            sync
+        done
+        
+        if $ZERO_PASS; then
+            $verbose && log "  Final pass: zeros"
+            dd if=/dev/zero of="$file" bs=4K count=$blocks conv=notrunc 2>/dev/null
+            sync
+        fi
+        
+        rm -f "$file"
+    fi
+}
+
+# Securely delete a directory
+delete_dir() {
+    local dir="$1"
+    local verbose="$2"
+    
+    $verbose && log "Wiping directory: $dir"
+    
+    # Delete all files first (depth-first)
+    find "$dir" -type f -print0 | while IFS= read -r -d '' file; do
+        delete_file "$file" "$verbose"
+    done
+    
+    # Remove empty directory structure
+    rm -rf "$dir"
+}
+
+# =============================================================================
+# ARGUMENT PARSING (rm-compatible)
+# =============================================================================
+
+RECURSIVE=false
+FORCE=false
+INTERACTIVE=false
+VERBOSE=false
+DIR_EMPTY=false
+TARGETS=()
+
+show_help() {
+    cat << 'EOF'
+sdelete - ShadowOS Secure Delete (rm replacement)
+
+Deletes files IRRECOVERABLY:
+  - Overwrites with random data (7 passes by default)
+  - Final zero pass to hide shredding
+  - No shell history logging
+
+Usage: sdelete [OPTIONS] FILE...
+       rm [OPTIONS] FILE...   (when aliased)
+
+Options:
+  -r, -R, --recursive   Delete directories recursively
+  -f, --force           Ignore nonexistent files
+  -i, --interactive     Prompt before each deletion
+  -v, --verbose         Show what is being done
+  -d, --dir             Remove empty directories
+  --passes=N            Number of overwrite passes (default: 7)
+  --no-zero             Skip final zero pass
+  --help                Show this help
+  --version             Show version
+
+To use original rm: \rm file
+
+Environment:
+  SHADOWOS_DELETE_PASSES=7   Number of overwrite passes
+  SHADOWOS_ZERO_PASS=true    Add final zero pass
+  SHADOWOS_QUIET=true        Suppress messages
+EOF
+    exit 0
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -r|-R|--recursive)
+            RECURSIVE=true
+            shift
+            ;;
+        -f|--force)
+            FORCE=true
+            shift
+            ;;
+        -i|--interactive)
+            INTERACTIVE=true  
+            shift
+            ;;
+        -v|--verbose)
+            VERBOSE=true
+            QUIET=false
+            shift
+            ;;
+        -d|--dir)
+            DIR_EMPTY=true
+            shift
+            ;;
+        --passes=*)
+            DELETE_PASSES="${1#*=}"
+            shift
+            ;;
+        --no-zero)
+            ZERO_PASS=false
+            shift
+            ;;
+        -rf|-fr)
+            RECURSIVE=true
+            FORCE=true
+            shift
+            ;;
+        --help)
+            show_help
+            ;;
+        --version)
+            echo "sdelete (ShadowOS) $VERSION"
+            exit 0
+            ;;
+        --)
+            shift
+            break
+            ;;
+        -*)
+            error "Unknown option: $1"
+            ;;
+        *)
+            TARGETS+=("$1")
+            shift
+            ;;
+    esac
+done
+
+# Add remaining args as targets
+TARGETS+=("$@")
+
+# Check we have targets
+if [[ ${#TARGETS[@]} -eq 0 ]]; then
+    error "No files specified. Usage: sdelete FILE..."
+fi
+
+# =============================================================================
+# MAIN LOGIC
+# =============================================================================
+
+for target in "${TARGETS[@]}"; do
+    if [[ ! -e "$target" ]]; then
+        if $FORCE; then
+            continue
+        else
+            error "Cannot remove '$target': No such file or directory"
+        fi
+    fi
+    
+    if [[ -d "$target" ]]; then
+        if $DIR_EMPTY; then
+            # Remove empty directory only
+            rmdir "$target" 2>/dev/null || error "Directory not empty: $target"
+            continue
+        fi
+        
+        if ! $RECURSIVE; then
+            error "'$target' is a directory (use -r to delete)"
+        fi
+        
+        if $INTERACTIVE; then
+            read -p "Recursively delete '$target' and all contents? [y/N] " answer
+            [[ "$answer" != "y" && "$answer" != "Y" ]] && continue
+        fi
+        
+        delete_dir "$target" $VERBOSE
+        
+    else
+        if $INTERACTIVE; then
+            read -p "Delete '$target'? [y/N] " answer
+            [[ "$answer" != "y" && "$answer" != "Y" ]] && continue
+        fi
+        
+        delete_file "$target" $VERBOSE
+    fi
+done
+
+$VERBOSE && log "Secure deletion complete"
+exit 0

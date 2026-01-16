@@ -1,0 +1,277 @@
+#!/bin/bash
+#
+# shadow-gpu - ShadowOS GPU Auto-Detection and Driver Management
+# /usr/bin/shadow-gpu
+#
+# Automatically detects and configures GPU for hashcat acceleration
+#
+
+set -euo pipefail
+
+VERSION="1.0.0"
+
+# =============================================================================
+# GPU DETECTION
+# =============================================================================
+
+detect_nvidia() {
+    lspci | grep -qi "nvidia" && return 0
+    [[ -d "/proc/driver/nvidia" ]] && return 0
+    return 1
+}
+
+detect_amd() {
+    lspci | grep -qi "amd.*radeon\|amd.*vega\|amd.*navi\|amd.*rx\|advanced micro devices.*display" && return 0
+    [[ -d "/sys/class/drm/card0/device/driver" ]] && readlink -f /sys/class/drm/card0/device/driver 2>/dev/null | grep -qi "amdgpu" && return 0
+    return 1
+}
+
+detect_intel() {
+    lspci | grep -qi "intel.*graphics\|intel.*uhd\|intel.*iris" && return 0
+    return 1
+}
+
+get_gpu_info() {
+    local gpu_type="none"
+    local gpu_name="Unknown"
+    local driver="none"
+    
+    if detect_nvidia; then
+        gpu_type="nvidia"
+        gpu_name=$(lspci | grep -i nvidia | head -1 | sed 's/.*: //')
+        driver=$(cat /proc/driver/nvidia/version 2>/dev/null | head -1 || echo "Not loaded")
+    elif detect_amd; then
+        gpu_type="amd"
+        gpu_name=$(lspci | grep -i "amd.*vga\|radeon" | head -1 | sed 's/.*: //')
+        driver=$(modinfo amdgpu 2>/dev/null | grep "^version:" | awk '{print $2}' || echo "Not loaded")
+    elif detect_intel; then
+        gpu_type="intel"
+        gpu_name=$(lspci | grep -i "intel.*graphics\|intel.*uhd\|intel.*iris" | head -1 | sed 's/.*: //')
+        driver=$(modinfo i915 2>/dev/null | grep "^version:" | awk '{print $2}' || echo "Builtin")
+    fi
+    
+    echo "$gpu_type|$gpu_name|$driver"
+}
+
+# =============================================================================
+# DRIVER INSTALLATION
+# =============================================================================
+
+install_nvidia_drivers() {
+    echo "[*] Installing NVIDIA drivers for hashcat..."
+    
+    # Check if already installed
+    if command -v nvidia-smi &>/dev/null; then
+        echo "[+] NVIDIA drivers already installed"
+        nvidia-smi --query-gpu=name,driver_version --format=csv,noheader
+        return 0
+    fi
+    
+    # Install based on package manager
+    if command -v apk &>/dev/null; then
+        apk add nvidia-driver nvidia-utils
+    elif command -v apt &>/dev/null; then
+        apt-get update
+        apt-get install -y nvidia-driver nvidia-cuda-toolkit
+    elif command -v dnf &>/dev/null; then
+        dnf install -y nvidia-driver nvidia-cuda
+    elif command -v pacman &>/dev/null; then
+        pacman -S --noconfirm nvidia nvidia-utils cuda
+    fi
+    
+    # Load module
+    modprobe nvidia 2>/dev/null || true
+    
+    echo "[+] NVIDIA drivers installed"
+}
+
+install_amd_drivers() {
+    echo "[*] Installing AMD ROCm for hashcat..."
+    
+    # Check if already installed
+    if command -v rocminfo &>/dev/null; then
+        echo "[+] AMD ROCm already installed"
+        rocminfo | grep "Name:" | head -1
+        return 0
+    fi
+    
+    # Install based on package manager
+    if command -v apt &>/dev/null; then
+        # Add ROCm repo for Debian/Ubuntu
+        apt-get update
+        apt-get install -y rocm-hip-libraries rocm-opencl-runtime
+    elif command -v dnf &>/dev/null; then
+        dnf install -y rocm-opencl
+    elif command -v pacman &>/dev/null; then
+        pacman -S --noconfirm rocm-hip-sdk opencl-amd
+    fi
+    
+    # Load modules
+    modprobe amdgpu 2>/dev/null || true
+    
+    echo "[+] AMD ROCm installed"
+}
+
+# =============================================================================
+# HASHCAT INTEGRATION
+# =============================================================================
+
+configure_hashcat() {
+    local gpu_type="$1"
+    
+    echo "[*] Configuring hashcat for $gpu_type GPU..."
+    
+    # Create hashcat wrapper with optimal settings
+    cat > /usr/local/bin/hashcat-auto << 'HASHCAT_WRAPPER'
+#!/bin/bash
+# Hashcat wrapper with auto GPU detection
+
+# Detect GPU and set optimal backend
+if lspci | grep -qi nvidia && command -v nvidia-smi &>/dev/null; then
+    BACKEND="-D 1"  # CUDA
+elif lspci | grep -qi amd && [[ -d /opt/rocm ]]; then
+    BACKEND="-D 1"  # OpenCL (ROCm)
+else
+    BACKEND="-D 2"  # CPU fallback
+fi
+
+# Run hashcat with detected backend
+exec hashcat $BACKEND "$@"
+HASHCAT_WRAPPER
+    
+    chmod +x /usr/local/bin/hashcat-auto
+    
+    echo "[+] Hashcat configured for $gpu_type acceleration"
+    echo "    Use 'hashcat-auto' or 'hashcat' to run"
+}
+
+# =============================================================================
+# STATUS DISPLAY
+# =============================================================================
+
+show_status() {
+    echo "╔═══════════════════════════════════════════════════════════════╗"
+    echo "║                    ShadowOS GPU Status                        ║"
+    echo "╠═══════════════════════════════════════════════════════════════╣"
+    
+    IFS='|' read -r gpu_type gpu_name driver <<< "$(get_gpu_info)"
+    
+    printf "║  GPU Type:   %-48s ║\n" "$gpu_type"
+    printf "║  GPU Name:   %-48s ║\n" "${gpu_name:0:48}"
+    printf "║  Driver:     %-48s ║\n" "${driver:0:48}"
+    
+    echo "╠═══════════════════════════════════════════════════════════════╣"
+    
+    # Hashcat status
+    if command -v hashcat &>/dev/null; then
+        local hc_version
+        hc_version=$(hashcat --version 2>/dev/null || echo "Unknown")
+        printf "║  Hashcat:    %-48s ║\n" "$hc_version"
+        
+        # Test hashcat devices
+        local devices
+        devices=$(hashcat -I 2>/dev/null | grep -c "Device" || echo "0")
+        printf "║  Devices:    %-48s ║\n" "$devices available for cracking"
+    else
+        printf "║  Hashcat:    %-48s ║\n" "Not installed"
+    fi
+    
+    echo "╚═══════════════════════════════════════════════════════════════╝"
+}
+
+# =============================================================================
+# AUTO-SETUP
+# =============================================================================
+
+auto_setup() {
+    echo "[*] ShadowOS GPU Auto-Setup"
+    echo ""
+    
+    IFS='|' read -r gpu_type gpu_name driver <<< "$(get_gpu_info)"
+    
+    echo "[*] Detected GPU: $gpu_name"
+    echo "[*] Type: $gpu_type"
+    
+    case "$gpu_type" in
+        nvidia)
+            install_nvidia_drivers
+            configure_hashcat "nvidia"
+            ;;
+        amd)
+            install_amd_drivers
+            configure_hashcat "amd"
+            ;;
+        intel)
+            echo "[*] Intel GPUs use built-in OpenCL support"
+            configure_hashcat "intel"
+            ;;
+        none)
+            echo "[!] No GPU detected - hashcat will use CPU mode"
+            configure_hashcat "cpu"
+            ;;
+    esac
+    
+    echo ""
+    show_status
+}
+
+# =============================================================================
+# BENCHMARK
+# =============================================================================
+
+benchmark() {
+    if ! command -v hashcat &>/dev/null; then
+        echo "[!] Hashcat not installed"
+        exit 1
+    fi
+    
+    echo "[*] Running GPU benchmark..."
+    echo ""
+    
+    # Quick benchmark on common hash types
+    for mode in 0 100 1400 2500 22000; do
+        echo "=== Hash mode $mode ==="
+        timeout 30 hashcat -b -m $mode 2>/dev/null | grep -E "Speed|Hash:" || echo "  (skipped)"
+        echo ""
+    done
+}
+
+# =============================================================================
+# MAIN
+# =============================================================================
+
+case "${1:-status}" in
+    status)
+        show_status
+        ;;
+    setup|auto)
+        auto_setup
+        ;;
+    install)
+        IFS='|' read -r gpu_type _ _ <<< "$(get_gpu_info)"
+        case "$gpu_type" in
+            nvidia) install_nvidia_drivers ;;
+            amd) install_amd_drivers ;;
+            *) echo "[!] No supported GPU detected" ;;
+        esac
+        ;;
+    benchmark|bench)
+        benchmark
+        ;;
+    *)
+        cat << 'EOF'
+shadow-gpu - ShadowOS GPU Management
+
+Usage: shadow-gpu <command>
+
+Commands:
+  status      Show GPU detection status
+  setup       Auto-detect and configure GPU for hashcat
+  install     Install appropriate GPU drivers
+  benchmark   Run hashcat GPU benchmark
+
+The system auto-detects NVIDIA/AMD GPUs and configures
+hashcat to use GPU acceleration automatically.
+EOF
+        ;;
+esac

@@ -1,0 +1,60 @@
+# Mako Notification Daemon Configuration for ShadowOS
+# /etc/xdg/mako/config
+
+# Default behavior
+max-visible=5
+sort=-time
+layer=overlay
+anchor=top-right
+
+# Appearance
+font=JetBrains Mono 10
+background-color=#1a1b26ee
+text-color=#c0caf5
+border-color=#7aa2f7
+border-radius=8
+border-size=2
+padding=12
+margin=12
+width=350
+height=150
+
+# Icons
+icons=1
+max-icon-size=48
+icon-path=/usr/share/icons/Papirus-Dark
+
+# Behavior
+default-timeout=5000
+ignore-timeout=0
+markup=1
+actions=1
+
+# Urgency levels
+[urgency=low]
+border-color=#414868
+default-timeout=3000
+
+[urgency=normal]
+border-color=#7aa2f7
+default-timeout=5000
+
+[urgency=critical]
+border-color=#f7768e
+background-color=#1a1b26
+default-timeout=0
+ignore-timeout=1
+
+# ShadowOS specific notifications
+[app-name="ShadowOS"]
+border-color=#9ece6a
+background-color=#1a1b26ee
+
+[summary~="Stealth.*"]
+border-color=#9ece6a
+
+[summary~="TOR.*"]
+border-color=#bb9af7
+
+[summary~="WiFi.*"]
+border-color=#7aa2f7

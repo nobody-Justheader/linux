@@ -1,0 +1,184 @@
+#!/bin/bash
+#
+# shadow-creds - Credential Manager
+# /usr/bin/shadow-creds
+#
+# Secure storage for captured/cracked credentials (RAM only)
+#
+
+set -euo pipefail
+
+VERSION="1.0.0"
+CREDS_DIR="/shadow/creds"
+DB_FILE="$CREDS_DIR/credentials.db"
+
+log() { echo "[creds] $*"; }
+error() { echo "[creds] ERROR: $*" >&2; exit 1; }
+
+ensure_dir() {
+    mkdir -p "$CREDS_DIR"
+    chmod 700 "$CREDS_DIR"
+    touch "$DB_FILE"
+    chmod 600 "$DB_FILE"
+}
+
+# Add credential
+cmd_add() {
+    local type="$1"      # wifi, web, ssh, ftp, etc
+    local target="$2"    # SSID, URL, host
+    local user="$3"
+    local pass="$4"
+    local notes="${5:-}"
+    
+    ensure_dir
+    
+    local timestamp=$(date -Iseconds)
+    echo "$timestamp|$type|$target|$user|$pass|$notes" >> "$DB_FILE"
+    
+    log "Added: $type credential for $target"
+}
+
+# List credentials
+cmd_list() {
+    local filter="${1:-}"
+    
+    ensure_dir
+    
+    echo ""
+    echo "╔═══════════════════════════════════════════════════════════════════════════╗"
+    echo "║                         Stored Credentials                                ║"
+    echo "╠═══════════════════════════════════════════════════════════════════════════╣"
+    printf "║  %-8s %-20s %-15s %-20s      ║\n" "TYPE" "TARGET" "USER" "PASSWORD"
+    echo "╠═══════════════════════════════════════════════════════════════════════════╣"
+    
+    if [[ -f "$DB_FILE" ]] && [[ -s "$DB_FILE" ]]; then
+        while IFS='|' read -r ts type target user pass notes; do
+            if [[ -z "$filter" ]] || [[ "$type" == "$filter" ]] || [[ "$target" == *"$filter"* ]]; then
+                # Truncate long values
+                printf "║  %-8s %-20s %-15s %-20s      ║\n" \
+                    "${type:0:8}" "${target:0:20}" "${user:0:15}" "${pass:0:20}"
+            fi
+        done < "$DB_FILE"
+    else
+        echo "║  (no credentials stored)                                                    ║"
+    fi
+    
+    echo "╚═══════════════════════════════════════════════════════════════════════════╝"
+    echo ""
+    echo "  Stored in RAM: $DB_FILE"
+    echo ""
+}
+
+# Search
+cmd_search() {
+    local query="$1"
+    
+    ensure_dir
+    
+    log "Searching for: $query"
+    
+    grep -i "$query" "$DB_FILE" 2>/dev/null | while IFS='|' read -r ts type target user pass notes; do
+        echo "[$type] $target - $user:$pass"
+    done
+}
+
+# Export
+cmd_export() {
+    local format="${1:-txt}"
+    local outfile="${2:-$CREDS_DIR/export_$(date +%H%M%S)}"
+    
+    ensure_dir
+    
+    case "$format" in
+        txt|text)
+            cp "$DB_FILE" "${outfile}.txt"
+            log "Exported: ${outfile}.txt"
+            ;;
+        csv)
+            echo "timestamp,type,target,user,password,notes" > "${outfile}.csv"
+            cat "$DB_FILE" | tr '|' ',' >> "${outfile}.csv"
+            log "Exported: ${outfile}.csv"
+            ;;
+        json)
+            echo "[" > "${outfile}.json"
+            while IFS='|' read -r ts type target user pass notes; do
+                echo "  {\"timestamp\":\"$ts\",\"type\":\"$type\",\"target\":\"$target\",\"user\":\"$user\",\"password\":\"$pass\",\"notes\":\"$notes\"}," >> "${outfile}.json"
+            done < "$DB_FILE"
+            echo "]" >> "${outfile}.json"
+            log "Exported: ${outfile}.json"
+            ;;
+    esac
+}
+
+# Import from file
+cmd_import() {
+    local file="$1"
+    local type="${2:-unknown}"
+    
+    [[ -f "$file" ]] || error "File not found: $file"
+    
+    ensure_dir
+    
+    local count=0
+    while read -r line; do
+        # Try common formats: user:pass, user:pass:target
+        if [[ "$line" == *":"* ]]; then
+            local user=$(echo "$line" | cut -d: -f1)
+            local pass=$(echo "$line" | cut -d: -f2)
+            local target=$(echo "$line" | cut -d: -f3)
+            
+            echo "$(date -Iseconds)|$type|${target:-imported}|$user|$pass|" >> "$DB_FILE"
+            ((count++))
+        fi
+    done < "$file"
+    
+    log "Imported $count credentials"
+}
+
+# Clear all
+cmd_clear() {
+    log "Clearing all credentials..."
+    rm -f "$DB_FILE"
+    touch "$DB_FILE"
+    chmod 600 "$DB_FILE"
+    log "Cleared"
+}
+
+show_help() {
+    cat << 'EOF'
+shadow-creds - Credential Manager
+
+Store and manage captured credentials (RAM only).
+
+Usage: shadow-creds <command> [args]
+
+Commands:
+  add <type> <target> <user> <pass> [notes]  Add credential
+  list [filter]                               List credentials
+  search <query>                              Search credentials
+  export <format> [file]                      Export (txt/csv/json)
+  import <file> [type]                        Import from file
+  clear                                       Clear all
+
+Types: wifi, web, ssh, ftp, smtp, mysql, rdp, etc.
+
+Examples:
+  shadow-creds add wifi "MyNetwork" "" "password123"
+  shadow-creds add web "example.com" "admin" "secret"
+  shadow-creds list wifi
+  shadow-creds export csv
+
+All data stored in RAM (/shadow/creds) - lost on reboot.
+EOF
+}
+
+case "${1:-list}" in
+    add)      cmd_add "${2:-}" "${3:-}" "${4:-}" "${5:-}" "${6:-}" ;;
+    list|ls)  cmd_list "${2:-}" ;;
+    search|find) cmd_search "${2:-}" ;;
+    export)   cmd_export "${2:-txt}" "${3:-}" ;;
+    import)   cmd_import "${2:-}" "${3:-}" ;;
+    clear)    cmd_clear ;;
+    help|-h)  show_help ;;
+    *)        error "Unknown: $1" ;;
+esac

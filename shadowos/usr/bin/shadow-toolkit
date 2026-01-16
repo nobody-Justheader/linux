@@ -1,0 +1,249 @@
+#!/bin/bash
+#
+# shadow-toolkit - ShadowOS Penetration Testing Toolkit Manager
+# /usr/bin/shadow-toolkit
+#
+# Install and manage complete pentesting toolkit by category
+#
+
+set -euo pipefail
+
+VERSION="1.0.0"
+
+# =============================================================================
+# TOOL CATEGORIES
+# =============================================================================
+
+TOOLS_RECON="nmap masscan rustscan netdiscover arp-scan dnsenum dnsrecon \
+             amass subfinder theharvester whois whatweb wafw00f"
+
+TOOLS_WIRELESS="aircrack-ng wifite kismet reaver pixiewps hcxdumptool \
+                hcxtools bettercap mdk4"
+
+TOOLS_WEB="burpsuite nikto zaproxy sqlmap wfuzz ffuf gobuster \
+           dirb dirbuster whatweb httpie curl wget"
+
+TOOLS_EXPLOIT="metasploit-framework exploit-db searchsploit commix \
+               routersploit"
+
+TOOLS_PASSWORD="hashcat john hydra medusa ncrack thc-pptp-bruter \
+                cewl crunch"
+
+TOOLS_SNIFFING="wireshark tcpdump ettercap mitmproxy bettercap \
+                responder dsniff"
+
+TOOLS_POST="impacket crackmapexec evil-winrm pth-toolkit mimikatz"
+
+TOOLS_FORENSICS="volatility binwalk foremost scalpel autopsy sleuthkit \
+                 exiftool mat2"
+
+TOOLS_REVERSE="ghidra radare2 gdb pwndbg binutils objdump strace ltrace \
+               rizin cutter"
+
+TOOLS_OSINT="maltego spiderfoot recon-ng sherlock holehe maigret"
+
+TOOLS_MOBILE="adb apktool jadx frida objection"
+
+TOOLS_CLOUD="awscli azure-cli scout-suite prowler"
+
+# =============================================================================
+# FUNCTIONS
+# =============================================================================
+
+log() {
+    echo "[shadow-toolkit] $*"
+}
+
+install_tools() {
+    local category="$1"
+    local tools=""
+    
+    case "$category" in
+        recon|reconnaissance) tools="$TOOLS_RECON" ;;
+        wireless|wifi)        tools="$TOOLS_WIRELESS" ;;
+        web)                  tools="$TOOLS_WEB" ;;
+        exploit|exploitation) tools="$TOOLS_EXPLOIT" ;;
+        password|passwords)   tools="$TOOLS_PASSWORD" ;;
+        sniffing|mitm)        tools="$TOOLS_SNIFFING" ;;
+        post|postexploit)     tools="$TOOLS_POST" ;;
+        forensics)            tools="$TOOLS_FORENSICS" ;;
+        reverse|reversing)    tools="$TOOLS_REVERSE" ;;
+        osint)                tools="$TOOLS_OSINT" ;;
+        mobile)               tools="$TOOLS_MOBILE" ;;
+        cloud)                tools="$TOOLS_CLOUD" ;;
+        all)
+            install_tools recon
+            install_tools wireless
+            install_tools web
+            install_tools exploit
+            install_tools password
+            install_tools sniffing
+            install_tools post
+            install_tools forensics
+            install_tools reverse
+            install_tools osint
+            return
+            ;;
+        kali)
+            # Use Kali repos on Debian-based systems
+            if [[ -f /etc/debian_version ]]; then
+                log "Using Kali repositories..."
+                shadow-kali add 2>/dev/null || true
+                shadow-kali install top10
+            else
+                log "Kali repos only work on Debian-based systems"
+            fi
+            return 0
+            ;;
+        *)
+            log "Unknown category: $category"
+            return 1
+            ;;
+    esac
+    
+    log "Installing $category tools..."
+    
+    for tool in $tools; do
+        log "  Installing: $tool"
+        shadow-pkg install "$tool" 2>/dev/null || log "    [!] Failed: $tool"
+    done
+    
+    log "Category $category complete"
+}
+
+list_tools() {
+    echo ""
+    echo "╔═══════════════════════════════════════════════════════════════════════╗"
+    echo "║                 ShadowOS Penetration Testing Toolkit                  ║"
+    echo "╠═══════════════════════════════════════════════════════════════════════╣"
+    echo "║                                                                       ║"
+    echo "║  RECONNAISSANCE (recon)                                               ║"
+    echo "║    nmap, masscan, rustscan, amass, subfinder, theharvester            ║"
+    echo "║                                                                       ║"
+    echo "║  WIRELESS (wireless)                                                  ║"
+    echo "║    aircrack-ng, wifite, kismet, bettercap, reaver, hcxtools           ║"
+    echo "║                                                                       ║"
+    echo "║  WEB APPLICATION (web)                                                ║"
+    echo "║    burpsuite, nikto, sqlmap, ffuf, gobuster, zaproxy                  ║"
+    echo "║                                                                       ║"
+    echo "║  EXPLOITATION (exploit)                                               ║"
+    echo "║    metasploit, searchsploit, routersploit, commix                     ║"
+    echo "║                                                                       ║"
+    echo "║  PASSWORD CRACKING (password)                                         ║"
+    echo "║    hashcat, john, hydra, medusa, ncrack, cewl, crunch                 ║"
+    echo "║                                                                       ║"
+    echo "║  SNIFFING & MITM (sniffing)                                           ║"
+    echo "║    wireshark, tcpdump, ettercap, mitmproxy, responder                 ║"
+    echo "║                                                                       ║"
+    echo "║  POST-EXPLOITATION (post)                                             ║"
+    echo "║    impacket, crackmapexec, evil-winrm, mimikatz                       ║"
+    echo "║                                                                       ║"
+    echo "║  FORENSICS (forensics)                                                ║"
+    echo "║    volatility, binwalk, foremost, autopsy, exiftool                   ║"
+    echo "║                                                                       ║"
+    echo "║  REVERSE ENGINEERING (reverse)                                        ║"
+    echo "║    ghidra, radare2, gdb, pwndbg, rizin, cutter                        ║"
+    echo "║                                                                       ║"
+    echo "║  OSINT (osint)                                                        ║"
+    echo "║    maltego, spiderfoot, recon-ng, sherlock, holehe                    ║"
+    echo "║                                                                       ║"
+    echo "║  MOBILE (mobile)                                                      ║"
+    echo "║    adb, apktool, jadx, frida, objection                               ║"
+    echo "║                                                                       ║"
+    echo "║  CLOUD (cloud)                                                        ║"
+    echo "║    aws-cli, azure-cli, scout-suite, prowler                           ║"
+    echo "║                                                                       ║"
+    echo "╚═══════════════════════════════════════════════════════════════════════╝"
+    echo ""
+}
+
+check_installed() {
+    local count=0
+    local total=0
+    local tools="$TOOLS_RECON $TOOLS_WIRELESS $TOOLS_WEB $TOOLS_EXPLOIT \
+                 $TOOLS_PASSWORD $TOOLS_SNIFFING $TOOLS_POST $TOOLS_FORENSICS \
+                 $TOOLS_REVERSE $TOOLS_OSINT"
+    
+    echo ""
+    echo "=== Toolkit Status ==="
+    echo ""
+    
+    for tool in $tools; do
+        ((total++))
+        if command -v "$tool" &>/dev/null; then
+            ((count++))
+            printf "  [✓] %s\n" "$tool"
+        else
+            printf "  [ ] %s\n" "$tool"
+        fi
+    done
+    
+    echo ""
+    echo "Installed: $count / $total tools"
+    echo ""
+}
+
+show_help() {
+    cat << 'EOF'
+shadow-toolkit - ShadowOS Penetration Testing Toolkit
+
+Install complete pentesting toolkits by category.
+
+Usage: shadow-toolkit <command> [category]
+
+Commands:
+  install <category>    Install tools by category
+  install all           Install ALL tools (~2GB)
+  list                  Show available categories and tools
+  status                Check which tools are installed
+  
+Categories:
+  recon       - Network reconnaissance
+  wireless    - WiFi security testing
+  web         - Web application testing
+  exploit     - Exploitation frameworks
+  password    - Password cracking
+  sniffing    - Network sniffing & MITM
+  post        - Post-exploitation
+  forensics   - Digital forensics
+  reverse     - Reverse engineering
+  osint       - Open source intelligence
+  mobile      - Mobile security testing
+  cloud       - Cloud security testing
+  all         - Install everything
+
+Examples:
+  shadow-toolkit install recon
+  shadow-toolkit install wireless web password
+  shadow-toolkit install all
+  shadow-toolkit status
+
+EOF
+}
+
+# =============================================================================
+# MAIN
+# =============================================================================
+
+case "${1:-help}" in
+    install|i)
+        shift
+        for category in "$@"; do
+            install_tools "$category"
+        done
+        ;;
+    list|ls)
+        list_tools
+        ;;
+    status|check)
+        check_installed
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "[!] Unknown command: $1"
+        show_help
+        exit 1
+        ;;
+esac

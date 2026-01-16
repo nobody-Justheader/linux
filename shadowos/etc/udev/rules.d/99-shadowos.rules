@@ -1,0 +1,19 @@
+# ShadowOS udev Rules - Automatic Hardware Stealth
+# /etc/udev/rules.d/99-shadowos.rules
+#
+# Automatically spoof identity on ANY network device hotplug
+
+# Randomize MAC on ethernet plug
+ACTION=="add", SUBSYSTEM=="net", KERNEL=="eth*", RUN+="/bin/sh -c 'ip link set %k down; ip link set %k address $(hexdump -n6 -e '\\''/1 \"%%02x\"'\\'' /dev/urandom | sed '\\''s/\\(..\\)/\\1:/g;s/:$//'\\''); ip link set %k up'"
+
+# Randomize MAC on wifi plug
+ACTION=="add", SUBSYSTEM=="net", KERNEL=="wlan*", RUN+="/bin/sh -c 'ip link set %k down; ip link set %k address $(hexdump -n6 -e '\\''/1 \"%%02x\"'\\'' /dev/urandom | sed '\\''s/\\(..\\)/\\1:/g;s/:$//'\\''); ip link set %k up'"
+
+# Randomize MAC on USB network adapters
+ACTION=="add", SUBSYSTEM=="net", DRIVERS=="*usb*", RUN+="/bin/sh -c 'ip link set %k down; ip link set %k address $(hexdump -n6 -e '\\''/1 \"%%02x\"'\\'' /dev/urandom | sed '\\''s/\\(..\\)/\\1:/g;s/:$//'\\''); ip link set %k up'"
+
+# Block Bluetooth by default
+ACTION=="add", SUBSYSTEM=="bluetooth", RUN+="/bin/sh -c 'rfkill block bluetooth'"
+
+# Disable USB storage automount (anti-forensic)
+ACTION=="add", SUBSYSTEM=="block", ENV{ID_USB_DRIVER}=="usb-storage", OPTIONS+="nowatch"

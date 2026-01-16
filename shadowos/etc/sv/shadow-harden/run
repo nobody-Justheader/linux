@@ -1,0 +1,20 @@
+#!/bin/sh
+# ShadowOS Auto-Hardening on Boot
+# /etc/sv/shadow-harden/run
+#
+# Privacy hardening is MANDATORY - runs automatically
+
+exec 2>&1
+
+echo "[shadowos] Applying mandatory privacy hardening..."
+
+# Wait for network to be up
+sleep 3
+
+# Apply hardening
+/usr/bin/shadow-harden all 2>&1
+
+echo "[shadowos] Privacy hardening complete"
+
+# One-shot service
+exec sleep infinity

@@ -1,0 +1,294 @@
+#!/bin/bash
+#
+# smount / sumount - ShadowOS Journal-Free Drive Mounting
+# /usr/bin/smount
+#
+# Mounts external drives with options to minimize forensic traces
+#
+
+set -euo pipefail
+
+VERSION="1.0.0"
+MOUNT_OPTS_DIR="/var/lib/shadowos/mounts"
+
+# =============================================================================
+# DEFAULT MOUNT OPTIONS (forensic-safe)
+# =============================================================================
+
+# Common options for all filesystems
+COMMON_OPTS="noatime,nodiratime,noexec"
+
+# Filesystem-specific options
+declare -A FS_OPTS=(
+    ["ext4"]="noatime,nodiratime,data=writeback,barrier=0,noexec"
+    ["ext3"]="noatime,nodiratime,data=writeback,noexec"
+    ["ext2"]="noatime,nodiratime,noexec"
+    ["vfat"]="noatime,fmask=0177,dmask=0077,uid=$(id -u),gid=$(id -g)"
+    ["exfat"]="noatime,fmask=0177,dmask=0077,uid=$(id -u),gid=$(id -g)"
+    ["ntfs"]="noatime,remove_hiberfile,show_sys_files,big_writes,uid=$(id -u),gid=$(id -g)"
+    ["ntfs3"]="noatime,uid=$(id -u),gid=$(id -g)"
+    ["btrfs"]="noatime,nodiratime,noexec,flushoncommit"
+    ["xfs"]="noatime,nodiratime,noexec"
+    ["f2fs"]="noatime,nodiratime,noexec"
+    ["tmpfs"]="noatime,nodev,nosuid,noexec,mode=0700"
+)
+
+# =============================================================================
+# HELPER FUNCTIONS
+# =============================================================================
+
+log() {
+    echo "[smount] $*"
+}
+
+error() {
+    echo "[smount] ERROR: $*" >&2
+    exit 1
+}
+
+# Detect filesystem type
+detect_fs() {
+    local device="$1"
+    blkid -o value -s TYPE "$device" 2>/dev/null || echo "unknown"
+}
+
+# Get mount options for filesystem
+get_mount_opts() {
+    local fs="$1"
+    echo "${FS_OPTS[$fs]:-$COMMON_OPTS}"
+}
+
+# Find available mount point
+find_mount_point() {
+    local device="$1"
+    local base="/mnt/shadow"
+    local label
+    label=$(blkid -o value -s LABEL "$device" 2>/dev/null | tr ' ' '_' || echo "")
+    
+    if [[ -n "$label" ]]; then
+        echo "$base/$label"
+    else
+        local name
+        name=$(basename "$device")
+        echo "$base/$name"
+    fi
+}
+
+# =============================================================================
+# MOUNT FUNCTIONS
+# =============================================================================
+
+cmd_mount() {
+    local device="$1"
+    local mount_point="${2:-}"
+    
+    if [[ -z "$device" ]]; then
+        error "Usage: smount <device> [mount_point]"
+    fi
+    
+    # Resolve device if it's a label or UUID
+    if [[ ! -b "$device" ]]; then
+        local resolved
+        resolved=$(blkid -L "$device" 2>/dev/null || blkid -U "$device" 2>/dev/null || echo "")
+        if [[ -n "$resolved" ]]; then
+            device="$resolved"
+        else
+            error "Device not found: $device"
+        fi
+    fi
+    
+    # Detect filesystem
+    local fs
+    fs=$(detect_fs "$device")
+    log "Device: $device (filesystem: $fs)"
+    
+    if [[ "$fs" == "unknown" ]]; then
+        error "Unknown filesystem on $device"
+    fi
+    
+    # Determine mount point
+    if [[ -z "$mount_point" ]]; then
+        mount_point=$(find_mount_point "$device")
+    fi
+    
+    # Create mount point
+    mkdir -p "$mount_point"
+    
+    # Get filesystem-specific options
+    local opts
+    opts=$(get_mount_opts "$fs")
+    
+    log "Mount options: $opts"
+    log "Mount point: $mount_point"
+    
+    # Handle NTFS with ntfs-3g
+    if [[ "$fs" == "ntfs" ]]; then
+        if command -v ntfs-3g &>/dev/null; then
+            ntfs-3g "$device" "$mount_point" -o "$opts" 2>/dev/null || \
+            mount -t ntfs3 "$device" "$mount_point" -o "${FS_OPTS[ntfs3]}" || \
+            error "Failed to mount NTFS"
+        else
+            mount -t ntfs3 "$device" "$mount_point" -o "${FS_OPTS[ntfs3]}" || \
+            error "Failed to mount NTFS (install ntfs-3g for better support)"
+        fi
+    else
+        mount -t "$fs" "$device" "$mount_point" -o "$opts" || \
+        error "Failed to mount $device"
+    fi
+    
+    # Save mount info
+    mkdir -p "$MOUNT_OPTS_DIR"
+    echo "$device:$mount_point:$fs:$(date +%s)" >> "$MOUNT_OPTS_DIR/active"
+    
+    log "✓ Mounted: $device -> $mount_point"
+    log "  Filesystem: $fs"
+    log "  Journal: DISABLED (forensic-safe mode)"
+    
+    echo ""
+    echo "╔═══════════════════════════════════════════════════════════════╗"
+    echo "║                  Drive Mounted (Stealth Mode)                 ║"
+    echo "╠═══════════════════════════════════════════════════════════════╣"
+    printf "║  Device:      %-49s ║\n" "$device"
+    printf "║  Mount:       %-49s ║\n" "$mount_point"
+    printf "║  Filesystem:  %-49s ║\n" "$fs"
+    printf "║  Journaling:  %-49s ║\n" "Disabled/Minimized"
+    echo "╠═══════════════════════════════════════════════════════════════╣"
+    printf "║  %-61s ║\n" "⚠️  Use 'sumount $mount_point' to safely unmount"
+    echo "╚═══════════════════════════════════════════════════════════════╝"
+    echo ""
+}
+
+cmd_unmount() {
+    local target="$1"
+    
+    if [[ -z "$target" ]]; then
+        error "Usage: sumount <device|mount_point>"
+    fi
+    
+    # Check if it's mounted
+    if ! mount | grep -q "$target"; then
+        error "Not mounted: $target"
+    fi
+    
+    log "Unmounting: $target"
+    
+    # Sync before unmount
+    sync
+    
+    # Unmount
+    umount "$target" 2>/dev/null || umount -l "$target" || error "Failed to unmount"
+    
+    # Remove from tracking
+    if [[ -f "$MOUNT_OPTS_DIR/active" ]]; then
+        sed -i "\|$target|d" "$MOUNT_OPTS_DIR/active" 2>/dev/null || true
+    fi
+    
+    # Clean mount point if it's ours
+    if [[ "$target" == /mnt/shadow/* ]]; then
+        rmdir "$target" 2>/dev/null || true
+    fi
+    
+    log "✓ Unmounted: $target"
+}
+
+cmd_list() {
+    echo ""
+    echo "=== Mounted Drives (Stealth Mode) ==="
+    echo ""
+    
+    if [[ -f "$MOUNT_OPTS_DIR/active" ]] && [[ -s "$MOUNT_OPTS_DIR/active" ]]; then
+        printf "%-20s %-30s %s\n" "Device" "Mount Point" "Filesystem"
+        printf "%s\n" "──────────────────────────────────────────────────────────────"
+        
+        while IFS=: read -r device mount_point fs timestamp; do
+            if mount | grep -q "$mount_point"; then
+                printf "%-20s %-30s %s\n" "$device" "$mount_point" "$fs"
+            fi
+        done < "$MOUNT_OPTS_DIR/active"
+    else
+        echo "  (no stealth mounts active)"
+    fi
+    
+    echo ""
+}
+
+cmd_available() {
+    echo ""
+    echo "=== Available Drives ==="
+    echo ""
+    
+    printf "%-15s %-10s %-10s %s\n" "Device" "Size" "Type" "Label"
+    printf "%s\n" "────────────────────────────────────────────────────────────"
+    
+    lsblk -o NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT -pn 2>/dev/null | \
+    while read -r name size fstype label mount; do
+        # Skip if already mounted
+        [[ -n "$mount" ]] && continue
+        # Skip if no filesystem
+        [[ -z "$fstype" ]] && continue
+        # Skip loop devices
+        [[ "$name" == *loop* ]] && continue
+        
+        printf "%-15s %-10s %-10s %s\n" "$name" "$size" "$fstype" "${label:-}"
+    done
+    
+    echo ""
+}
+
+show_help() {
+    cat << 'EOF'
+smount / sumount - ShadowOS Stealth Drive Mounting
+
+Mount external drives with forensic-safe options (no journaling, no atime).
+
+Usage:
+  smount <device> [mount_point]    Mount drive
+  smount -l                        List stealth mounts
+  smount -a                        Show available drives
+  sumount <mount_point>            Unmount drive
+
+Stealth features:
+  • noatime, nodiratime - No access time updates
+  • data=writeback      - Minimal journaling (ext4)
+  • remove_hiberfile    - Clean NTFS hibernation
+  • No exec permissions - Prevent accidental execution
+
+Examples:
+  smount /dev/sdb1                  # Auto mount to /mnt/shadow/
+  smount /dev/sdb1 /mnt/usb         # Custom mount point
+  sumount /mnt/shadow/sdb1          # Safely unmount
+
+Supported filesystems:
+  ext2, ext3, ext4, vfat, exfat, ntfs, btrfs, xfs, f2fs
+
+EOF
+}
+
+# =============================================================================
+# MAIN
+# =============================================================================
+
+# Check root for mounting
+if [[ $EUID -ne 0 ]] && [[ "${1:-}" != "-h" ]] && [[ "${1:-}" != "--help" ]]; then
+    echo "[!] Mounting requires root privileges"
+    echo "    Run with: sudo smount $*"
+    exit 1
+fi
+
+case "${1:--h}" in
+    -l|--list|list)
+        cmd_list
+        ;;
+    -a|--available|available)
+        cmd_available
+        ;;
+    -h|--help|help)
+        show_help
+        ;;
+    -*)
+        error "Unknown option: $1"
+        ;;
+    *)
+        cmd_mount "$1" "${2:-}"
+        ;;
+esac

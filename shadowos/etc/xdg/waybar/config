@@ -1,0 +1,100 @@
+{
+    "layer": "top",
+    "position": "top",
+    "height": 32,
+    "spacing": 8,
+    "margin-top": 4,
+    "margin-left": 8,
+    "margin-right": 8,
+
+    "modules-left": ["sway/workspaces", "sway/mode", "sway/window"],
+    "modules-center": ["clock"],
+    "modules-right": ["custom/stealth", "custom/tor", "network", "pulseaudio", "battery", "custom/power"],
+
+    "sway/workspaces": {
+        "disable-scroll": false,
+        "all-outputs": true,
+        "format": "{icon}",
+        "format-icons": {
+            "1": "󰎤",
+            "2": "󰎧",
+            "3": "󰎪",
+            "4": "󰎭",
+            "5": "󰎱",
+            "urgent": "󰀨",
+            "focused": "󰮯",
+            "default": "󰊠"
+        }
+    },
+
+    "sway/mode": {
+        "format": "<span style=\"italic\">{}</span>"
+    },
+
+    "sway/window": {
+        "max-length": 40
+    },
+
+    "clock": {
+        "format": "󰥔 {:%H:%M}",
+        "format-alt": "󰃭 {:%Y-%m-%d %H:%M:%S}",
+        "tooltip-format": "<tt>{calendar}</tt>",
+        "interval": 1
+    },
+
+    "custom/stealth": {
+        "exec": "if [ -f /var/lib/shadowos/stealth/current_* ]; then echo '{\"text\": \"󰒃\", \"tooltip\": \"Stealth Active\", \"class\": \"active\"}'; else echo '{\"text\": \"󰒄\", \"tooltip\": \"Normal Mode\", \"class\": \"inactive\"}'; fi",
+        "return-type": "json",
+        "interval": 5,
+        "on-click": "foot -e sudo shadow-stealth randomize wlan0"
+    },
+
+    "custom/tor": {
+        "exec": "if pgrep -x tor > /dev/null; then echo '{\"text\": \"󰗹\", \"tooltip\": \"TOR Active\", \"class\": \"active\"}'; else echo '{\"text\": \"󰗺\", \"tooltip\": \"TOR Inactive\", \"class\": \"inactive\"}'; fi",
+        "return-type": "json",
+        "interval": 10,
+        "on-click": "foot -e shadow-tor status"
+    },
+
+    "network": {
+        "interface": "wlan0",
+        "format-wifi": "󰖩 {signalStrength}%",
+        "format-ethernet": "󰈀 {ipaddr}",
+        "format-disconnected": "󰖪 {essid}",
+        "format-alt": "󰖩 {essid} ({signalStrength}%)",
+        "tooltip-format-wifi": "SSID: {essid}\nIP: {ipaddr}\nSignal: {signalStrength}%\nFreq: {frequency}MHz",
+        "tooltip-format-ethernet": "{ifname}: {ipaddr}/{cidr}",
+        "tooltip-format-disconnected": "Disconnected (auto-connecting...)",
+        "on-click-right": "foot -e shadow-wifi status",
+        "interval": 5
+    },
+
+    "pulseaudio": {
+        "format": "{icon} {volume}%",
+        "format-muted": "󰝟",
+        "format-icons": {
+            "default": ["󰕿", "󰖀", "󰕾"]
+        },
+        "on-click": "pactl set-sink-mute @DEFAULT_SINK@ toggle",
+        "on-scroll-up": "pactl set-sink-volume @DEFAULT_SINK@ +5%",
+        "on-scroll-down": "pactl set-sink-volume @DEFAULT_SINK@ -5%"
+    },
+
+    "battery": {
+        "states": {
+            "warning": 30,
+            "critical": 15
+        },
+        "format": "{icon} {capacity}%",
+        "format-charging": "󰂄 {capacity}%",
+        "format-plugged": "󰚥 {capacity}%",
+        "format-icons": ["󰁺", "󰁻", "󰁼", "󰁽", "󰁾", "󰁿", "󰂀", "󰂁", "󰂂", "󰁹"],
+        "tooltip-format": "{timeTo}\n{power}W"
+    },
+
+    "custom/power": {
+        "format": "󰐥",
+        "tooltip": "Power Menu",
+        "on-click": "swaynag -t warning -m 'Power Options' -B 'Lock' 'swaylock -f' -B 'Logout' 'swaymsg exit' -B 'Shutdown' 'systemctl poweroff' -B 'Reboot' 'systemctl reboot'"
+    }
+}

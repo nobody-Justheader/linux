@@ -1,0 +1,213 @@
+#!/bin/sh
+# ShadowOS Init - Automatic Security on Boot
+# /etc/init.d/shadowos
+#
+# All security features are MANDATORY and AUTOMATIC
+# No user commands required
+
+### BEGIN INIT INFO
+# Provides:          shadowos
+# Required-Start:    $local_fs
+# Required-Stop:
+# Default-Start:     S
+# Default-Stop:
+# Short-Description: ShadowOS automatic security
+### END INIT INFO
+
+log() { echo "[shadowos] $*"; }
+
+# =============================================================================
+# IDENTITY SPOOFING (Thorough)
+# =============================================================================
+
+spoof_identity() {
+    log "Spoofing identity..."
+    
+    # Randomize all network interface MACs
+    for iface in /sys/class/net/*; do
+        iface=$(basename "$iface")
+        [ "$iface" = "lo" ] && continue
+        
+        ip link set "$iface" down 2>/dev/null
+        
+        # Generate random MAC with common vendor prefixes
+        local vendors="00:0c:29 00:50:56 00:1c:42 00:25:00 d8:cb:8a 94:65:2d"
+        local vendor=$(echo $vendors | tr ' ' '\n' | shuf -n1)
+        local suffix=$(hexdump -n3 -e '3/1 ":%02x"' /dev/urandom)
+        local mac="${vendor}${suffix}"
+        
+        ip link set "$iface" address "$mac" 2>/dev/null
+        ip link set "$iface" up 2>/dev/null
+    done
+    
+    # Randomize hostname
+    local adjectives="silent hidden ghost shadow dark stealth quiet"
+    local nouns="fox wolf hawk raven phantom specter wraith"
+    local adj=$(echo $adjectives | tr ' ' '\n' | shuf -n1)
+    local noun=$(echo $nouns | tr ' ' '\n' | shuf -n1)
+    local num=$(shuf -i 100-999 -n1)
+    local hostname="${adj}-${noun}-${num}"
+    
+    hostname "$hostname"
+    echo "$hostname" > /etc/hostname
+    
+    # Spoof machine-id
+    head -c 16 /dev/urandom | md5sum | cut -d' ' -f1 > /etc/machine-id
+    
+    # Spoof CPU/hardware info in /proc (where possible)
+    # Note: Some require kernel patches
+    
+    log "Identity: MAC randomized, hostname=$hostname"
+}
+
+# =============================================================================
+# KERNEL HARDENING
+# =============================================================================
+
+harden_kernel() {
+    log "Hardening kernel..."
+    
+    # Core security
+    echo "|/bin/false" > /proc/sys/kernel/core_pattern
+    echo 0 > /proc/sys/fs/suid_dumpable
+    echo 0 > /proc/sys/kernel/sysrq
+    echo 1 > /proc/sys/kernel/dmesg_restrict
+    echo 2 > /proc/sys/kernel/kptr_restrict
+    echo 2 > /proc/sys/kernel/randomize_va_space
+    echo 2 > /proc/sys/kernel/yama/ptrace_scope 2>/dev/null
+    echo 1 > /proc/sys/kernel/kexec_load_disabled 2>/dev/null
+    
+    # Network hardening
+    echo 1 > /proc/sys/net/ipv4/conf/all/rp_filter
+    echo 0 > /proc/sys/net/ipv4/conf/all/accept_redirects
+    echo 0 > /proc/sys/net/ipv4/conf/all/send_redirects
+    echo 1 > /proc/sys/net/ipv4/icmp_echo_ignore_all
+    echo 1 > /proc/sys/net/ipv4/tcp_syncookies
+    echo 0 > /proc/sys/net/ipv6/conf/all/accept_redirects
+    
+    log "Kernel hardened"
+}
+
+# =============================================================================
+# DISABLE DATA LEAKS
+# =============================================================================
+
+disable_leaks() {
+    log "Disabling data leaks..."
+    
+    # Disable swap
+    swapoff -a 2>/dev/null
+    
+    # Disable shell history
+    export HISTSIZE=0 HISTFILESIZE=0
+    unset HISTFILE
+    rm -f /root/.bash_history /home/*/.bash_history 2>/dev/null
+    ln -sf /dev/null /root/.bash_history 2>/dev/null
+    
+    # Disable core dumps
+    ulimit -c 0
+    
+    # Clear temp
+    rm -rf /tmp/* /var/tmp/* 2>/dev/null
+    
+    # Disable logging to disk
+    if [ -d /var/log ]; then
+        mount -t tmpfs tmpfs /var/log 2>/dev/null
+    fi
+    
+    log "Data leaks disabled"
+}
+
+# =============================================================================
+# FIREWALL
+# =============================================================================
+
+setup_firewall() {
+    log "Setting up firewall..."
+    
+    # Default deny
+    iptables -F
+    iptables -P INPUT DROP
+    iptables -P FORWARD DROP
+    iptables -P OUTPUT ACCEPT
+    
+    # Allow established
+    iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+    iptables -A INPUT -i lo -j ACCEPT
+    
+    # IPv6
+    ip6tables -F 2>/dev/null
+    ip6tables -P INPUT DROP 2>/dev/null
+    ip6tables -P FORWARD DROP 2>/dev/null
+    ip6tables -P OUTPUT ACCEPT 2>/dev/null
+    ip6tables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null
+    ip6tables -A INPUT -i lo -j ACCEPT 2>/dev/null
+    
+    log "Firewall active"
+}
+
+# =============================================================================
+# RAM WORKSPACE
+# =============================================================================
+
+setup_workspace() {
+    log "Creating RAM workspace..."
+    
+    mkdir -p /shadow
+    mount -t tmpfs -o size=50%,mode=700 tmpfs /shadow
+    mkdir -p /shadow/{captures,scans,recon,creds,reports}
+    
+    log "RAM workspace ready at /shadow"
+}
+
+# =============================================================================
+# NETWORK STEALTH (on interface up)
+# =============================================================================
+
+setup_network_hooks() {
+    # Re-spoof MAC on every network connection
+    mkdir -p /etc/NetworkManager/dispatcher.d
+    cat > /etc/NetworkManager/dispatcher.d/99-shadowos << 'HOOK'
+#!/bin/sh
+# Re-randomize on connection
+if [ "$2" = "up" ]; then
+    vendor="00:0c:29 00:50:56 00:1c:42"
+    v=$(echo $vendor | tr ' ' '\n' | shuf -n1)
+    s=$(hexdump -n3 -e '3/1 ":%02x"' /dev/urandom)
+    ip link set "$1" down
+    ip link set "$1" address "${v}${s}"
+    ip link set "$1" up
+fi
+HOOK
+    chmod +x /etc/NetworkManager/dispatcher.d/99-shadowos
+}
+
+# =============================================================================
+# MAIN
+# =============================================================================
+
+case "$1" in
+    start)
+        log "=== ShadowOS Security Initializing ==="
+        spoof_identity
+        harden_kernel
+        disable_leaks
+        setup_firewall
+        setup_workspace
+        setup_network_hooks
+        
+        # Start stealth recon daemon
+        /etc/init.d/shadow-recon start &
+        
+        log "=== ShadowOS Ready ==="
+        ;;
+    stop)
+        # Cleanup on shutdown
+        log "Secure shutdown..."
+        rm -rf /shadow/* 2>/dev/null
+        umount /shadow 2>/dev/null
+        ;;
+    *)
+        echo "Usage: $0 {start|stop}"
+        ;;
+esac

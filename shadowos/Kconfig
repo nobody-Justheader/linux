@@ -1,0 +1,110 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# ShadowOS - Privacy-focused distribution configuration
+#
+
+menuconfig SHADOWOS
+	bool "ShadowOS Privacy Distribution"
+	depends on X86_64 || ARM64 || RISCV
+	help
+	  Enable ShadowOS privacy-focused distribution features.
+	  
+	  ShadowOS is a penetration testing and privacy OS with:
+	    - Hidden encrypted boot partition
+	    - Automatic MAC/hostname randomization
+	    - Anti-forensic file operations
+	    - RAM-only workspace
+	    - Kali tool integration
+	  
+	  If unsure, say N.
+
+if SHADOWOS
+
+config SHADOWOS_HIDDEN_BOOT
+	bool "Hidden boot partition support"
+	depends on BLK_DEV_DM && DM_CRYPT
+	default y
+	help
+	  Enable support for hidden encrypted boot partitions
+	  with detached LUKS headers. System auto-detects
+	  installation media and boots in most secure mode.
+
+config SHADOWOS_ANTI_FORENSIC
+	bool "Anti-forensic features"
+	default y
+	help
+	  Enable anti-forensic features:
+	    - Secure file deletion (7-pass overwrite)
+	    - Metadata scrubbing
+	    - Journal-free mounting
+	    - Shell history disabled
+
+config SHADOWOS_STEALTH_NETWORK
+	bool "Network stealth features"
+	depends on NET && WIRELESS
+	default y
+	help
+	  Enable network stealth:
+	    - MAC address randomization
+	    - Hostname spoofing
+	    - Device profile emulation
+
+config SHADOWOS_HARDENING
+	bool "Mandatory privacy hardening"
+	select SECURITY
+	select SECURITY_NETWORK
+	select STACKPROTECTOR_STRONG
+	select HARDENED_USERCOPY
+	select FORTIFY_SOURCE
+	default y
+	help
+	  Apply mandatory security hardening:
+	    - Kernel sysctl hardening
+	    - Disable swap
+	    - Disable core dumps
+	    - Firewall defaults
+
+config SHADOWOS_DESKTOP
+	bool "Sway desktop environment"
+	default y
+	help
+	  Include Sway Wayland compositor configuration
+	  with Tokyo Night theme.
+
+config SHADOWOS_KALI_TOOLS
+	bool "Kali tool integration"
+	default y
+	help
+	  Enable Kali repository integration for security tools.
+	  Tools are downloaded during first boot.
+
+choice
+	prompt "Default tool preset"
+	depends on SHADOWOS_KALI_TOOLS
+	default SHADOWOS_TOOLS_MINIMAL
+
+config SHADOWOS_TOOLS_MINIMAL
+	bool "Minimal (~500MB)"
+	help
+	  Core tools only: nmap, aircrack-ng, hashcat
+
+config SHADOWOS_TOOLS_STANDARD
+	bool "Standard (~2GB)"
+	help
+	  Core + WiFi + Web + Password tools
+
+config SHADOWOS_TOOLS_FULL
+	bool "Full Kali (~15GB)"
+	help
+	  Complete Kali Linux toolkit
+
+endchoice
+
+config SHADOWOS_RAM_ONLY
+	bool "RAM-only mode by default"
+	default n
+	help
+	  Boot into RAM-only mode where nothing is written to disk.
+	  All data is lost on shutdown.
+
+endif # SHADOWOS

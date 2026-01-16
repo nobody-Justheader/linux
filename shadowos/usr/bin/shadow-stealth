@@ -1,0 +1,431 @@
+#!/bin/bash
+#
+# shadow-stealth - ShadowOS Network Stealth / Device Camouflage
+# /usr/bin/shadow-stealth
+#
+# Randomizes MAC address, hostname, and device fingerprint
+# to appear as different types of network devices.
+#
+
+set -euo pipefail
+
+VERSION="1.0.0"
+STATE_DIR="/var/lib/shadowos/stealth"
+
+# =============================================================================
+# DEVICE DATABASE
+# MAC prefixes (OUI) for various manufacturers
+# =============================================================================
+
+declare -A MAC_PREFIXES=(
+    # Network Equipment
+    ["cisco"]="00:1A:A1 00:1B:0D 00:1D:45 00:22:55"
+    ["netgear"]="00:1F:33 00:1E:2A 00:22:3F 00:26:F2"
+    ["tplink"]="50:C7:BF 60:E3:27 70:4F:57 98:DA:C4"
+    ["ubiquiti"]="FC:EC:DA 78:8A:20 80:2A:A8 B4:FB:E4"
+    ["mikrotik"]="D4:01:C3 E4:8D:8C 6C:3B:6B CC:2D:E0"
+    ["linksys"]="00:1A:70 00:1C:10 00:21:29 00:25:9C"
+    ["dlink"]="00:1B:11 00:1C:F0 00:1E:58 00:22:B0"
+    
+    # Printers
+    ["hp_printer"]="00:1E:0B 00:21:5A 00:23:7D 00:25:B3"
+    ["canon_printer"]="00:1E:8F 00:BB:C1 18:0C:AC 3C:A9:F4"
+    ["epson_printer"]="00:26:AB 44:D2:44 64:EB:8C A4:EE:57"
+    ["brother_printer"]="00:80:77 00:1B:A9 30:05:5C 78:DD:12"
+    ["xerox_printer"]="00:00:AA 00:00:74 08:00:37 64:00:6A"
+    
+    # Apple Devices
+    ["apple_iphone"]="F0:99:BF 48:A9:D2 3C:06:30 8C:7C:92"
+    ["apple_ipad"]="04:F7:E4 1C:91:48 34:08:BC 68:D9:3C"
+    ["apple_macbook"]="3C:22:FB 78:31:C1 A4:83:E7 DC:A4:CA"
+    ["apple_watch"]="38:89:2C 7C:04:D0 9C:8B:A0 F0:B4:79"
+    
+    # Samsung Devices
+    ["samsung_phone"]="AC:5F:3E 78:47:1D 84:25:DB BC:44:34"
+    ["samsung_tv"]="00:12:FB 5C:49:7D 78:BD:BC F4:7B:5E"
+    ["samsung_tablet"]="10:D5:42 44:6D:6C 50:B7:C3 A0:82:1F"
+    
+    # Google Devices
+    ["google_pixel"]="94:EB:2C 3C:28:6D 48:D6:D5 F8:0F:F9"
+    ["google_home"]="30:FD:38 48:D6:D5 F4:F5:D8 54:60:09"
+    ["google_chromecast"]="6C:AD:F8 D8:6C:63 F4:F5:E8"
+    
+    # Amazon Devices
+    ["amazon_echo"]="74:C2:46 4C:EF:C0 68:37:E9 A0:02:DC"
+    ["amazon_fire"]="00:FC:8B 08:84:9D 34:D2:70 44:65:0D"
+    ["amazon_kindle"]="28:EF:01 40:B4:CD 74:75:48 F0:27:2D"
+    
+    # IoT Devices
+    ["philips_hue"]="00:17:88 EC:B5:FA"
+    ["nest"]="64:16:66 18:B4:30 64:16:66"
+    ["ring"]="B0:09:DA 34:3E:A4"
+    ["sonos"]="00:0E:58 5C:AA:FD 78:28:CA B8:E9:37"
+    
+    # Gaming Consoles
+    ["sony_ps5"]="F8:46:1C 00:D9:D1 28:3F:69"
+    ["sony_ps4"]="00:04:1F 00:15:C1 00:19:C5 00:24:8D"
+    ["microsoft_xbox"]="98:7A:14 00:50:F2 7C:ED:8D"
+    ["nintendo_switch"]="7C:BB:8A 98:B6:E9 A4:C0:E1"
+    
+    # Smart TVs
+    ["lg_tv"]="CC:2D:83 00:1C:62 10:68:3F 58:A2:B5"
+    ["roku"]="B0:A7:37 00:0D:4B 84:EA:ED C8:3A:6B"
+    ["vizio"]="00:19:9D 00:27:A0 64:AE:0C"
+    
+    # Laptops
+    ["dell_laptop"]="00:14:22 00:21:9B 00:24:E8 18:A9:9B"
+    ["lenovo_laptop"]="00:1A:6B 00:21:86 18:F4:6A 28:D2:44"
+    ["hp_laptop"]="00:21:5A 00:24:81 10:1F:74 3C:52:82"
+    
+    # Random (locally administered)
+    ["random"]="RANDOM"
+)
+
+# Hostname templates
+declare -A HOSTNAME_TEMPLATES=(
+    ["cisco"]="SW-FLOOR-{N} SWITCH-{HEX} RTR-CORE-{N}"
+    ["netgear"]="NETGEAR-{HEX} R7000-{HEX}"
+    ["hp_printer"]="HP-LaserJet-{N} HPPRINTER{HEX}"
+    ["canon_printer"]="Canon-MG{N} CANON{HEX}"
+    ["apple_iphone"]="iPhone iPHONE-{HEX}"
+    ["apple_ipad"]="iPad IPAD-{HEX}"
+    ["apple_macbook"]="MacBook-Pro MacBook-{HEX}"
+    ["samsung_phone"]="Galaxy-S{N} SM-G{N}"
+    ["samsung_tv"]="Samsung-TV SAMSUNG-{HEX}"
+    ["google_pixel"]="Pixel-{N} Pixel"
+    ["google_home"]="Google-Home Google-Home-Mini"
+    ["amazon_echo"]="Echo-Dot Echo-{HEX}"
+    ["sony_ps5"]="PS5-{HEX} PlayStation5"
+    ["microsoft_xbox"]="Xbox-{HEX} XBOX"
+    ["nintendo_switch"]="Switch-{HEX} Nintendo"
+    ["dell_laptop"]="DESKTOP-{HEX} Dell-{HEX}"
+    ["lenovo_laptop"]="LAPTOP-{HEX} ThinkPad-{HEX}"
+)
+
+# =============================================================================
+# HELPER FUNCTIONS
+# =============================================================================
+
+log() {
+    echo "[shadow-stealth] $*"
+}
+
+random_hex() {
+    local len="${1:-6}"
+    openssl rand -hex $((len/2)) | tr '[:lower:]' '[:upper:]'
+}
+
+random_number() {
+    local min="${1:-1}"
+    local max="${2:-99}"
+    echo $((RANDOM % (max - min + 1) + min))
+}
+
+# Generate MAC from prefix pool
+generate_mac() {
+    local device_type="$1"
+    
+    if [[ "$device_type" == "random" ]]; then
+        # Locally administered, unicast MAC
+        printf '%02x:%02x:%02x:%02x:%02x:%02x' \
+            $((RANDOM%256 & 0xFE | 0x02)) \
+            $((RANDOM%256)) $((RANDOM%256)) \
+            $((RANDOM%256)) $((RANDOM%256)) $((RANDOM%256))
+        return
+    fi
+    
+    local prefixes="${MAC_PREFIXES[$device_type]:-}"
+    if [[ -z "$prefixes" ]]; then
+        log "Unknown device type, using random"
+        generate_mac "random"
+        return
+    fi
+    
+    # Pick random prefix from available ones
+    local prefix_array=($prefixes)
+    local prefix="${prefix_array[RANDOM % ${#prefix_array[@]}]}"
+    
+    # Add random suffix
+    printf '%s:%02x:%02x:%02x' "$prefix" \
+        $((RANDOM%256)) $((RANDOM%256)) $((RANDOM%256))
+}
+
+# Generate hostname from template
+generate_hostname() {
+    local device_type="$1"
+    
+    local templates="${HOSTNAME_TEMPLATES[$device_type]:-HOST-{HEX}}"
+    local template_array=($templates)
+    local template="${template_array[RANDOM % ${#template_array[@]}]}"
+    
+    # Replace placeholders
+    template="${template//\{N\}/$(random_number 1 99)}"
+    template="${template//\{HEX\}/$(random_hex 6)}"
+    
+    echo "$template"
+}
+
+# Save original identity
+save_original() {
+    local interface="$1"
+    local save_file="$STATE_DIR/original_${interface}"
+    
+    mkdir -p "$STATE_DIR"
+    
+    if [[ ! -f "$save_file" ]]; then
+        cat > "$save_file" << EOF
+ORIG_MAC=$(cat /sys/class/net/$interface/address)
+ORIG_HOSTNAME=$(hostname)
+SAVED_AT=$(date +%s)
+EOF
+        log "Original identity saved for $interface"
+    fi
+}
+
+# =============================================================================
+# MAIN FUNCTIONS
+# =============================================================================
+
+apply_identity() {
+    local interface="$1"
+    local mac="$2"
+    local hostname="$3"
+    local device_type="${4:-unknown}"
+    
+    log "Applying new identity..."
+    log "  Interface:  $interface"
+    log "  MAC:        $mac"
+    log "  Hostname:   $hostname"
+    log "  Appears as: $device_type"
+    
+    # Save original first
+    save_original "$interface"
+    
+    # Bring interface down
+    ip link set "$interface" down 2>/dev/null || true
+    
+    # Change MAC address
+    if command -v macchanger &>/dev/null; then
+        macchanger --mac="$mac" "$interface" &>/dev/null
+    else
+        ip link set "$interface" address "$mac"
+    fi
+    
+    # Change hostname
+    hostnamectl set-hostname "$hostname" 2>/dev/null || hostname "$hostname"
+    
+    # Update /etc/hosts
+    sed -i "s/127.0.1.1.*/127.0.1.1\t$hostname/" /etc/hosts 2>/dev/null || true
+    
+    # Bring interface up
+    ip link set "$interface" up 2>/dev/null || true
+    
+    # Save current spoofed identity
+    cat > "$STATE_DIR/current_${interface}" << EOF
+DEVICE_TYPE=$device_type
+MAC=$mac
+HOSTNAME=$hostname
+APPLIED_AT=$(date +%s)
+EOF
+    
+    log "Identity applied successfully!"
+}
+
+cmd_randomize() {
+    local interface="${1:-eth0}"
+    
+    # Pick random device type
+    local device_types=("${!MAC_PREFIXES[@]}")
+    local device_type="${device_types[RANDOM % ${#device_types[@]}]}"
+    
+    local mac
+    mac=$(generate_mac "$device_type")
+    
+    local hostname
+    hostname=$(generate_hostname "$device_type")
+    
+    apply_identity "$interface" "$mac" "$hostname" "$device_type"
+}
+
+cmd_device() {
+    local device_type="$1"
+    local interface="${2:-eth0}"
+    
+    if [[ -z "$device_type" ]]; then
+        log "Usage: shadow-stealth device <type> [interface]"
+        log "Run 'shadow-stealth list' to see available types"
+        exit 1
+    fi
+    
+    if [[ -z "${MAC_PREFIXES[$device_type]:-}" ]]; then
+        log "Unknown device type: $device_type"
+        log "Run 'shadow-stealth list' to see available types"
+        exit 1
+    fi
+    
+    local mac
+    mac=$(generate_mac "$device_type")
+    
+    local hostname
+    hostname=$(generate_hostname "$device_type")
+    
+    apply_identity "$interface" "$mac" "$hostname" "$device_type"
+}
+
+cmd_restore() {
+    local interface="${1:-eth0}"
+    local save_file="$STATE_DIR/original_${interface}"
+    
+    if [[ ! -f "$save_file" ]]; then
+        log "No saved identity for $interface"
+        exit 1
+    fi
+    
+    source "$save_file"
+    
+    log "Restoring original identity..."
+    
+    ip link set "$interface" down 2>/dev/null || true
+    ip link set "$interface" address "$ORIG_MAC"
+    hostnamectl set-hostname "$ORIG_HOSTNAME" 2>/dev/null || hostname "$ORIG_HOSTNAME"
+    ip link set "$interface" up 2>/dev/null || true
+    
+    rm -f "$save_file" "$STATE_DIR/current_${interface}"
+    
+    log "Original identity restored"
+    log "  MAC:      $ORIG_MAC"
+    log "  Hostname: $ORIG_HOSTNAME"
+}
+
+cmd_status() {
+    local interface="${1:-eth0}"
+    
+    echo ""
+    echo "╔═══════════════════════════════════════════════════════════════╗"
+    echo "║                  ShadowOS Stealth Status                      ║"
+    echo "╠═══════════════════════════════════════════════════════════════╣"
+    
+    printf "║  Interface:   %-49s ║\n" "$interface"
+    
+    local current_mac
+    current_mac=$(cat /sys/class/net/$interface/address 2>/dev/null || echo "N/A")
+    printf "║  MAC Address: %-49s ║\n" "$current_mac"
+    
+    printf "║  Hostname:    %-49s ║\n" "$(hostname)"
+    
+    if [[ -f "$STATE_DIR/current_${interface}" ]]; then
+        source "$STATE_DIR/current_${interface}"
+        printf "║  Appears as:  %-49s ║\n" "$DEVICE_TYPE"
+        echo "╠═══════════════════════════════════════════════════════════════╣"
+        printf "║  %-61s ║\n" "⚠️  STEALTH MODE ACTIVE"
+    else
+        echo "╠═══════════════════════════════════════════════════════════════╣"
+        printf "║  %-61s ║\n" "Normal mode (not spoofed)"
+    fi
+    
+    echo "╚═══════════════════════════════════════════════════════════════╝"
+    echo ""
+}
+
+cmd_list() {
+    echo ""
+    echo "=== Available Device Profiles ==="
+    echo ""
+    echo "Network Equipment:"
+    echo "  cisco, netgear, tplink, ubiquiti, mikrotik, linksys, dlink"
+    echo ""
+    echo "Printers:"
+    echo "  hp_printer, canon_printer, epson_printer, brother_printer, xerox_printer"
+    echo ""
+    echo "Apple Devices:"
+    echo "  apple_iphone, apple_ipad, apple_macbook, apple_watch"
+    echo ""
+    echo "Samsung Devices:"
+    echo "  samsung_phone, samsung_tv, samsung_tablet"
+    echo ""
+    echo "Google Devices:"
+    echo "  google_pixel, google_home, google_chromecast"
+    echo ""
+    echo "Amazon Devices:"
+    echo "  amazon_echo, amazon_fire, amazon_kindle"
+    echo ""
+    echo "IoT Devices:"
+    echo "  philips_hue, nest, ring, sonos"
+    echo ""
+    echo "Gaming:"
+    echo "  sony_ps5, sony_ps4, microsoft_xbox, nintendo_switch"
+    echo ""
+    echo "Smart TVs:"
+    echo "  lg_tv, roku, vizio"
+    echo ""
+    echo "Laptops:"
+    echo "  dell_laptop, lenovo_laptop, hp_laptop"
+    echo ""
+    echo "Special:"
+    echo "  random - Fully random locally-administered MAC"
+    echo ""
+}
+
+show_help() {
+    cat << 'EOF'
+shadow-stealth - ShadowOS Network Stealth
+
+Randomize your network identity to appear as different devices.
+
+Usage: shadow-stealth <command> [args]
+
+Commands:
+  randomize [if]       Pick random device and apply identity
+  device <type> [if]   Appear as specific device type
+  restore [if]         Restore original identity
+  status [if]          Show current stealth status
+  list                 List available device profiles
+
+Examples:
+  shadow-stealth randomize wlan0       # Random device on wlan0
+  shadow-stealth device hp_printer     # Appear as HP printer
+  shadow-stealth device apple_iphone   # Appear as iPhone
+  shadow-stealth device cisco eth0     # Appear as Cisco switch
+  shadow-stealth restore               # Back to original
+
+Default interface: eth0
+
+EOF
+}
+
+# =============================================================================
+# MAIN
+# =============================================================================
+
+# Check if running as root for MAC changes
+if [[ $EUID -ne 0 ]] && [[ "${1:-}" != "list" ]] && [[ "${1:-}" != "status" ]]; then
+    echo "[!] MAC spoofing requires root privileges"
+    echo "    Run with: sudo shadow-stealth $*"
+    exit 1
+fi
+
+case "${1:-status}" in
+    randomize|random|rand)
+        cmd_randomize "${2:-eth0}"
+        ;;
+    device|as)
+        cmd_device "${2:-}" "${3:-eth0}"
+        ;;
+    restore|reset|original)
+        cmd_restore "${2:-eth0}"
+        ;;
+    status)
+        cmd_status "${2:-eth0}"
+        ;;
+    list|types|devices)
+        cmd_list
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "[!] Unknown command: $1"
+        show_help
+        exit 1
+        ;;
+esac

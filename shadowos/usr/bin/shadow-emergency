@@ -1,0 +1,99 @@
+#!/bin/sh
+#
+# shadow-emergency - Emergency recovery shell with hidden access
+# /usr/bin/shadow-emergency
+#
+# Provides root shell access without booting full OS
+# Used from initramfs or GRUB rescue
+#
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+NC='\033[0m'
+
+echo ""
+echo -e "${RED}╔═══════════════════════════════════════════════════════════╗${NC}"
+echo -e "${RED}║              ShadowOS Emergency Recovery                  ║${NC}"
+echo -e "${RED}╚═══════════════════════════════════════════════════════════╝${NC}"
+echo ""
+
+# Load modules
+modprobe dm_crypt 2>/dev/null
+modprobe xts 2>/dev/null
+modprobe aes_generic 2>/dev/null
+modprobe usb_storage 2>/dev/null
+modprobe vfat 2>/dev/null
+
+sleep 2
+
+# Find encrypted device
+echo "[*] Scanning for encrypted volumes..."
+crypt_dev=""
+for dev in /dev/sd?3 /dev/sd?2 /dev/nvme?n1p3 /dev/nvme?n1p2; do
+    [ -b "$dev" ] || continue
+    if cryptsetup isLuks "$dev" 2>/dev/null; then
+        echo "    Found: $dev"
+        crypt_dev="$dev"
+    fi
+done
+
+[ -z "$crypt_dev" ] && {
+    echo "[!] No encrypted volumes found"
+    exec /bin/sh
+}
+
+# Find header
+echo "[*] Searching for header..."
+header=""
+for dev in /dev/sd?1 /dev/sd?2; do
+    [ -b "$dev" ] || continue
+    mkdir -p /tmp/hdr
+    if mount -t vfat -o ro "$dev" /tmp/hdr 2>/dev/null; then
+        if [ -f /tmp/hdr/.shadow/header.bin ]; then
+            echo "    Header found"
+            header="/tmp/hdr/.shadow/header.bin"
+            break
+        fi
+        umount /tmp/hdr 2>/dev/null
+    fi
+done
+
+# Decrypt
+echo ""
+echo -n "Password: "
+stty -echo 2>/dev/null || true
+read pass
+stty echo 2>/dev/null || true
+echo ""
+
+if [ -n "$header" ]; then
+    echo "$pass" | cryptsetup open --header "$header" "$crypt_dev" shadow_root
+else
+    echo "$pass" | cryptsetup open "$crypt_dev" shadow_root
+fi
+
+if [ ! -b /dev/mapper/shadow_root ]; then
+    echo -e "${RED}[!] Decryption failed${NC}"
+    [ -n "$header" ] && umount /tmp/hdr 2>/dev/null
+    exec /bin/sh
+fi
+
+echo -e "${GREEN}[✓] Volume decrypted${NC}"
+[ -n "$header" ] && umount /tmp/hdr 2>/dev/null
+
+# Mount
+mkdir -p /mnt/root
+mount /dev/mapper/shadow_root /mnt/root
+
+echo ""
+echo "Hidden volume mounted at /mnt/root"
+echo ""
+echo "Available commands:"
+echo "  chroot /mnt/root     - Enter system"
+echo "  exit                 - Close and reboot"
+echo ""
+
+# Drop to shell
+export PS1="(shadow-recovery) # "
+exec /bin/sh

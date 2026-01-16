@@ -1,0 +1,213 @@
+#!/bin/bash
+#
+# shadow-crack - Hash Cracking Wrapper
+# /usr/bin/shadow-crack
+#
+# Unified interface for hashcat/john with auto GPU detection
+#
+
+set -euo pipefail
+
+VERSION="1.0.0"
+WORDLIST_DIR="/usr/share/wordlists"
+DEFAULT_WORDLIST="$WORDLIST_DIR/shadow-common.txt"
+
+log() { echo "[crack] $*"; }
+error() { echo "[crack] ERROR: $*" >&2; exit 1; }
+
+# Detect best cracking tool
+detect_cracker() {
+    if command -v hashcat &>/dev/null; then
+        # Check for GPU
+        if hashcat -I 2>/dev/null | grep -q "Device"; then
+            echo "hashcat-gpu"
+        else
+            echo "hashcat-cpu"
+        fi
+    elif command -v john &>/dev/null; then
+        echo "john"
+    else
+        error "No cracking tool found (install hashcat or john)"
+    fi
+}
+
+# Common hash type detection
+detect_hash_type() {
+    local hash="$1"
+    local len=${#hash}
+    
+    case "$hash" in
+        '$1$'*)     echo "500" ;;     # md5crypt
+        '$2'*'$'*)  echo "3200" ;;    # bcrypt
+        '$5$'*)     echo "7400" ;;    # sha256crypt
+        '$6$'*)     echo "1800" ;;    # sha512crypt
+        '$apr1$'*)  echo "1600" ;;    # Apache MD5
+        *)
+            case $len in
+                32)  echo "0" ;;      # MD5
+                40)  echo "100" ;;    # SHA1
+                64)  echo "1400" ;;   # SHA256
+                128) echo "1700" ;;   # SHA512
+                *)   echo "auto" ;;
+            esac
+            ;;
+    esac
+}
+
+cmd_crack() {
+    local hashfile="$1"
+    local wordlist="${2:-$DEFAULT_WORDLIST}"
+    local hashtype="${3:-auto}"
+    
+    [[ -f "$hashfile" ]] || error "Hash file not found: $hashfile"
+    
+    if [[ ! -f "$wordlist" ]]; then
+        log "Wordlist not found, downloading..."
+        shadow-wordlist get "$(basename "$wordlist" .txt)" 2>/dev/null || true
+    fi
+    
+    local cracker=$(detect_cracker)
+    log "Using: $cracker"
+    log "Wordlist: $wordlist"
+    
+    # Auto-detect hash type
+    if [[ "$hashtype" == "auto" ]]; then
+        local sample=$(head -1 "$hashfile")
+        hashtype=$(detect_hash_type "$sample")
+        log "Detected hash type: $hashtype"
+    fi
+    
+    case "$cracker" in
+        hashcat-gpu)
+            hashcat -m "$hashtype" -a 0 --force -O "$hashfile" "$wordlist"
+            ;;
+        hashcat-cpu)
+            hashcat -m "$hashtype" -a 0 --force -D 1 "$hashfile" "$wordlist"
+            ;;
+        john)
+            john --wordlist="$wordlist" "$hashfile"
+            ;;
+    esac
+}
+
+cmd_wifi() {
+    local capfile="$1"
+    local wordlist="${2:-$DEFAULT_WORDLIST}"
+    
+    [[ -f "$capfile" ]] || error "Capture file not found: $capfile"
+    
+    log "Cracking WiFi capture: $capfile"
+    
+    # Convert to hashcat format if needed
+    local hccapx="${capfile%.pcap}.hccapx"
+    local hash22000="${capfile%.pcap}.22000"
+    
+    if [[ "$capfile" == *.pcap ]] || [[ "$capfile" == *.cap ]]; then
+        if command -v hcxpcapngtool &>/dev/null; then
+            hcxpcapngtool -o "$hash22000" "$capfile" 2>/dev/null
+            capfile="$hash22000"
+        elif command -v cap2hccapx &>/dev/null; then
+            cap2hccapx "$capfile" "$hccapx" 2>/dev/null
+            capfile="$hccapx"
+        fi
+    fi
+    
+    local cracker=$(detect_cracker)
+    
+    if [[ "$capfile" == *.22000 ]]; then
+        # WPA-PMKID-PBKDF2
+        hashcat -m 22000 -a 0 --force "$capfile" "$wordlist"
+    elif [[ "$capfile" == *.hccapx ]]; then
+        # WPA/WPA2
+        hashcat -m 2500 -a 0 --force "$capfile" "$wordlist"
+    else
+        hashcat -m 22000 -a 0 --force "$capfile" "$wordlist"
+    fi
+}
+
+cmd_show() {
+    local hashfile="$1"
+    
+    log "Showing cracked passwords..."
+    
+    if command -v hashcat &>/dev/null; then
+        hashcat --show "$hashfile" 2>/dev/null
+    elif command -v john &>/dev/null; then
+        john --show "$hashfile"
+    fi
+}
+
+cmd_benchmark() {
+    log "Running benchmark..."
+    
+    if command -v hashcat &>/dev/null; then
+        hashcat -b --force
+    elif command -v john &>/dev/null; then
+        john --test
+    fi
+}
+
+cmd_status() {
+    echo ""
+    echo "╔════════════════════════════════════════════════════════════╗"
+    echo "║               ShadowOS Hash Cracking Status                ║"
+    echo "╠════════════════════════════════════════════════════════════╣"
+    
+    local cracker=$(detect_cracker 2>/dev/null || echo "none")
+    printf "║  Cracker:    %-47s ║\n" "$cracker"
+    
+    # GPU status
+    if command -v hashcat &>/dev/null; then
+        local gpu_info=$(hashcat -I 2>/dev/null | grep "Device Name" | head -1 | cut -d: -f2 || echo "None")
+        printf "║  GPU:        %-47s ║\n" "${gpu_info:0:45}"
+    fi
+    
+    # Wordlists
+    local wl_count=$(ls -1 "$WORDLIST_DIR"/*.txt 2>/dev/null | wc -l)
+    printf "║  Wordlists:  %-47s ║\n" "$wl_count available"
+    
+    echo "╚════════════════════════════════════════════════════════════╝"
+}
+
+show_help() {
+    cat << 'EOF'
+shadow-crack - Hash Cracking Wrapper
+
+Unified interface for password cracking with auto GPU detection.
+
+Usage: shadow-crack <command> [args]
+
+Commands:
+  crack <hashes> [wordlist] [type]  Crack hash file
+  wifi <capture> [wordlist]         Crack WiFi capture
+  show <hashes>                     Show cracked passwords
+  benchmark                         Run speed benchmark
+  status                            Show cracker status
+
+Hash types (auto-detected):
+  0    - MD5
+  100  - SHA1
+  1400 - SHA256
+  1700 - SHA512
+  1800 - sha512crypt
+  2500 - WPA/WPA2
+  22000- WPA-PMKID
+
+Examples:
+  shadow-crack crack hashes.txt
+  shadow-crack crack hashes.txt rockyou.txt 0
+  shadow-crack wifi capture.cap wifi-common.txt
+  shadow-crack benchmark
+
+EOF
+}
+
+case "${1:-help}" in
+    crack)      cmd_crack "${2:-}" "${3:-}" "${4:-auto}" ;;
+    wifi)       cmd_wifi "${2:-}" "${3:-}" ;;
+    show)       cmd_show "${2:-}" ;;
+    benchmark)  cmd_benchmark ;;
+    status)     cmd_status ;;
+    help|-h)    show_help ;;
+    *)          error "Unknown command: $1" ;;
+esac

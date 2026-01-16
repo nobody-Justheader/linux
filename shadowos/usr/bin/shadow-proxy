@@ -1,0 +1,142 @@
+#!/bin/bash
+#
+# shadow-proxy - Traffic Interception Proxy
+# /usr/bin/shadow-proxy
+#
+# Transparent proxy for traffic inspection and modification
+#
+
+set -euo pipefail
+
+VERSION="1.0.0"
+PROXY_PORT="${PROXY_PORT:-8080}"
+SOCKS_PORT="${SOCKS_PORT:-1080}"
+LOG_DIR="/shadow/proxy"
+
+log() { echo "[proxy] $*"; }
+error() { echo "[proxy] ERROR: $*" >&2; exit 1; }
+
+# Start mitmproxy
+cmd_start() {
+    local mode="${1:-web}"
+    
+    mkdir -p "$LOG_DIR"
+    
+    case "$mode" in
+        web|http)
+            log "Starting HTTP proxy on :$PROXY_PORT..."
+            if command -v mitmproxy &>/dev/null; then
+                mitmproxy --listen-port "$PROXY_PORT" \
+                    --set confdir="$LOG_DIR" \
+                    --save-stream-file "$LOG_DIR/traffic.mitm"
+            elif command -v mitmdump &>/dev/null; then
+                mitmdump --listen-port "$PROXY_PORT" \
+                    -w "$LOG_DIR/traffic.mitm" &
+                echo $! > "$LOG_DIR/.proxy.pid"
+                log "Proxy running in background (PID: $!)"
+            else
+                error "mitmproxy not installed"
+            fi
+            ;;
+        transparent)
+            log "Starting transparent proxy..."
+            # Setup iptables for transparent proxying
+            iptables -t nat -A OUTPUT -p tcp --dport 80 -j REDIRECT --to-port "$PROXY_PORT"
+            iptables -t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-port "$PROXY_PORT"
+            
+            mitmproxy --mode transparent --listen-port "$PROXY_PORT"
+            ;;
+        socks)
+            log "Starting SOCKS proxy on :$SOCKS_PORT..."
+            if command -v microsocks &>/dev/null; then
+                microsocks -p "$SOCKS_PORT" &
+                echo $! > "$LOG_DIR/.socks.pid"
+            elif command -v ssh &>/dev/null; then
+                log "Use: ssh -D $SOCKS_PORT user@host"
+            fi
+            ;;
+    esac
+}
+
+cmd_stop() {
+    log "Stopping proxy..."
+    
+    # Kill proxy processes
+    for pidfile in "$LOG_DIR"/.*.pid; do
+        [[ -f "$pidfile" ]] && kill $(cat "$pidfile") 2>/dev/null && rm -f "$pidfile"
+    done
+    
+    pkill -f mitmproxy 2>/dev/null || true
+    pkill -f mitmdump 2>/dev/null || true
+    
+    # Remove iptables rules
+    iptables -t nat -D OUTPUT -p tcp --dport 80 -j REDIRECT --to-port "$PROXY_PORT" 2>/dev/null || true
+    iptables -t nat -D OUTPUT -p tcp --dport 443 -j REDIRECT --to-port "$PROXY_PORT" 2>/dev/null || true
+    
+    log "Proxy stopped"
+}
+
+cmd_config() {
+    echo ""
+    echo "╔════════════════════════════════════════════════════════════╗"
+    echo "║                  Proxy Configuration                       ║"
+    echo "╠════════════════════════════════════════════════════════════╣"
+    echo "║  HTTP Proxy:    http://localhost:$PROXY_PORT               ║"
+    echo "║  SOCKS Proxy:   socks5://localhost:$SOCKS_PORT             ║"
+    echo "╠════════════════════════════════════════════════════════════╣"
+    echo "║  Environment variables:                                    ║"
+    echo "║    export http_proxy=http://127.0.0.1:$PROXY_PORT          ║"
+    echo "║    export https_proxy=http://127.0.0.1:$PROXY_PORT         ║"
+    echo "╠════════════════════════════════════════════════════════════╣"
+    echo "║  Firefox/Chrome: Set manual proxy to localhost:$PROXY_PORT ║"
+    echo "║  CA Certificate: $LOG_DIR/mitmproxy-ca-cert.pem            ║"
+    echo "╚════════════════════════════════════════════════════════════╝"
+    echo ""
+}
+
+cmd_replay() {
+    local file="${1:-$LOG_DIR/traffic.mitm}"
+    
+    [[ -f "$file" ]] || error "No traffic file: $file"
+    
+    log "Replaying traffic from $file..."
+    mitmproxy -r "$file"
+}
+
+show_help() {
+    cat << 'EOF'
+shadow-proxy - Traffic Interception Proxy
+
+Intercept, inspect, and modify network traffic.
+
+Usage: shadow-proxy <command> [options]
+
+Commands:
+  start [mode]     Start proxy (web|transparent|socks)
+  stop             Stop all proxies
+  config           Show proxy configuration
+  replay [file]    Replay captured traffic
+
+Modes:
+  web          - Standard HTTP/HTTPS proxy
+  transparent  - Transparent intercept (requires root)
+  socks        - SOCKS5 proxy
+
+Examples:
+  shadow-proxy start
+  shadow-proxy start transparent
+  shadow-proxy config
+  shadow-proxy replay
+
+Traffic saved to /shadow/proxy
+EOF
+}
+
+case "${1:-help}" in
+    start)    cmd_start "${2:-web}" ;;
+    stop)     cmd_stop ;;
+    config)   cmd_config ;;
+    replay)   cmd_replay "${2:-}" ;;
+    help|-h)  show_help ;;
+    *)        error "Unknown: $1" ;;
+esac

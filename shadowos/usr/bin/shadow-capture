@@ -1,0 +1,221 @@
+#!/bin/bash
+#
+# shadow-capture - Network Capture Manager
+# /usr/bin/shadow-capture
+#
+# Capture and analyze network traffic with auto-save to RAM
+#
+
+set -euo pipefail
+
+VERSION="1.0.0"
+CAPTURE_DIR="/shadow/captures"
+DEFAULT_INTERFACE="${SHADOW_INTERFACE:-wlan0}"
+
+log() { echo "[capture] $*"; }
+error() { echo "[capture] ERROR: $*" >&2; exit 1; }
+
+ensure_workspace() {
+    if ! mountpoint -q /shadow 2>/dev/null; then
+        log "Creating RAM workspace..."
+        shadow-workspace create 2>/dev/null || mkdir -p "$CAPTURE_DIR"
+    fi
+    mkdir -p "$CAPTURE_DIR"
+}
+
+# Generate unique capture filename
+gen_filename() {
+    local prefix="$1"
+    echo "$CAPTURE_DIR/${prefix}_$(date +%Y%m%d_%H%M%S).pcap"
+}
+
+cmd_start() {
+    local interface="${1:-$DEFAULT_INTERFACE}"
+    local filter="${2:-}"
+    local outfile=$(gen_filename "capture")
+    
+    ensure_workspace
+    
+    log "Starting capture on $interface..."
+    log "Output: $outfile"
+    [[ -n "$filter" ]] && log "Filter: $filter"
+    
+    if command -v tcpdump &>/dev/null; then
+        tcpdump -i "$interface" -w "$outfile" $filter &
+        echo $! > "$CAPTURE_DIR/.capture.pid"
+        log "Capture running (PID: $!)"
+        log "Stop with: shadow-capture stop"
+    else
+        error "tcpdump not installed"
+    fi
+}
+
+cmd_stop() {
+    if [[ -f "$CAPTURE_DIR/.capture.pid" ]]; then
+        local pid=$(cat "$CAPTURE_DIR/.capture.pid")
+        kill "$pid" 2>/dev/null && log "Capture stopped"
+        rm -f "$CAPTURE_DIR/.capture.pid"
+    else
+        pkill -f "tcpdump.*$CAPTURE_DIR" 2>/dev/null || true
+        log "Capture stopped"
+    fi
+}
+
+cmd_wifi() {
+    local interface="${1:-$DEFAULT_INTERFACE}"
+    local channel="${2:-}"
+    local outfile=$(gen_filename "wifi")
+    
+    ensure_workspace
+    
+    log "Starting WiFi capture on $interface..."
+    
+    # Put in monitor mode
+    local mon_if="${interface}mon"
+    airmon-ng check kill 2>/dev/null
+    airmon-ng start "$interface" $channel 2>/dev/null
+    
+    [[ -d "/sys/class/net/$mon_if" ]] || mon_if="$interface"
+    
+    log "Monitor interface: $mon_if"
+    log "Output: $outfile"
+    
+    # Capture with airodump or tcpdump
+    if command -v airodump-ng &>/dev/null; then
+        airodump-ng -w "${outfile%.pcap}" --output-format pcap "$mon_if" &
+        echo "$! $mon_if" > "$CAPTURE_DIR/.wifi.pid"
+    else
+        tcpdump -i "$mon_if" -w "$outfile" &
+        echo "$! $mon_if" > "$CAPTURE_DIR/.wifi.pid"
+    fi
+    
+    log "WiFi capture running"
+    log "Stop with: shadow-capture wifi-stop"
+}
+
+cmd_wifi_stop() {
+    if [[ -f "$CAPTURE_DIR/.wifi.pid" ]]; then
+        read pid mon_if < "$CAPTURE_DIR/.wifi.pid"
+        kill "$pid" 2>/dev/null
+        airmon-ng stop "$mon_if" 2>/dev/null || true
+        rm -f "$CAPTURE_DIR/.wifi.pid"
+    else
+        pkill airodump-ng 2>/dev/null || true
+        airmon-ng stop wlan0mon 2>/dev/null || true
+    fi
+    log "WiFi capture stopped"
+}
+
+cmd_analyze() {
+    local pcap="${1:-}"
+    
+    [[ -f "$pcap" ]] || error "File not found: $pcap"
+    
+    log "Analyzing: $pcap"
+    echo ""
+    
+    if command -v tshark &>/dev/null; then
+        echo "=== Protocol Hierarchy ==="
+        tshark -r "$pcap" -q -z io,phs 2>/dev/null | head -30
+        echo ""
+        
+        echo "=== Endpoints ==="
+        tshark -r "$pcap" -q -z endpoints,ip 2>/dev/null | head -20
+        echo ""
+        
+        echo "=== HTTP Requests ==="
+        tshark -r "$pcap" -Y "http.request" -T fields \
+            -e ip.src -e http.host -e http.request.uri 2>/dev/null | head -20
+        echo ""
+        
+        echo "=== Credentials (cleartext) ==="
+        tshark -r "$pcap" -Y "http.authbasic or ftp.request.command == USER or ftp.request.command == PASS" \
+            -T fields -e ip.src -e http.authbasic -e ftp.request.arg 2>/dev/null | head -10
+    else
+        # Fallback to tcpdump
+        echo "=== Packet Summary ==="
+        tcpdump -r "$pcap" -c 50 2>/dev/null
+    fi
+}
+
+cmd_list() {
+    echo ""
+    echo "=== Captures in $CAPTURE_DIR ==="
+    echo ""
+    
+    if [[ -d "$CAPTURE_DIR" ]]; then
+        ls -lh "$CAPTURE_DIR"/*.pcap 2>/dev/null || echo "  (no captures)"
+    fi
+    echo ""
+}
+
+cmd_extract() {
+    local pcap="${1:-}"
+    local type="${2:-all}"
+    
+    [[ -f "$pcap" ]] || error "File not found: $pcap"
+    
+    local outdir="$CAPTURE_DIR/extracted_$(date +%H%M%S)"
+    mkdir -p "$outdir"
+    
+    log "Extracting from $pcap to $outdir..."
+    
+    case "$type" in
+        files|all)
+            # Extract files with foremost or binwalk
+            if command -v foremost &>/dev/null; then
+                foremost -i "$pcap" -o "$outdir/files" 2>/dev/null
+            fi
+            ;;
+        creds|credentials)
+            # Extract credentials with custom parsing
+            tshark -r "$pcap" -Y "http.authbasic" -T fields -e http.authbasic > "$outdir/http_auth.txt" 2>/dev/null
+            tshark -r "$pcap" -Y "ftp.request.command == PASS" -T fields -e ftp.request.arg > "$outdir/ftp_pass.txt" 2>/dev/null
+            ;;
+    esac
+    
+    log "Extracted to: $outdir"
+}
+
+show_help() {
+    cat << 'EOF'
+shadow-capture - Network Capture Manager
+
+Capture and analyze network traffic (saved to RAM workspace).
+
+Usage: shadow-capture <command> [args]
+
+Commands:
+  start [if] [filter]   Start packet capture
+  stop                  Stop capture
+  wifi [if] [channel]   Start WiFi monitor capture
+  wifi-stop             Stop WiFi capture
+  list                  List captures
+  analyze <pcap>        Analyze capture file
+  extract <pcap> [type] Extract files/credentials
+
+Examples:
+  shadow-capture start wlan0
+  shadow-capture start eth0 "port 80 or port 443"
+  shadow-capture wifi wlan0 6
+  shadow-capture analyze /shadow/captures/capture_*.pcap
+
+All captures saved to /shadow (RAM, never on disk).
+EOF
+}
+
+# =============================================================================
+# MAIN
+# =============================================================================
+
+case "${1:-help}" in
+    start)          cmd_start "${2:-}" "${3:-}" ;;
+    stop)           cmd_stop ;;
+    wifi)           cmd_wifi "${2:-}" "${3:-}" ;;
+    wifi-stop)      cmd_wifi_stop ;;
+    list|ls)        cmd_list ;;
+    analyze)        cmd_analyze "${2:-}" ;;
+    extract)        cmd_extract "${2:-}" "${3:-all}" ;;
+    help|--help|-h) show_help ;;
+    *)              error "Unknown command: $1" ;;
+esac

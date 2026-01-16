@@ -1,0 +1,52 @@
+#!/bin/bash
+#
+# sumount - ShadowOS Safe Unmount (symlink target for smount)
+# /usr/bin/sumount
+#
+# Safely unmounts drives with sync
+#
+
+set -euo pipefail
+
+MOUNT_OPTS_DIR="/var/lib/shadowos/mounts"
+
+log() {
+    echo "[sumount] $*"
+}
+
+error() {
+    echo "[sumount] ERROR: $*" >&2
+    exit 1
+}
+
+if [[ $# -eq 0 ]]; then
+    echo "Usage: sumount <device|mount_point>"
+    exit 1
+fi
+
+target="$1"
+
+# Check if it's mounted
+if ! mount | grep -q "$target"; then
+    error "Not mounted: $target"
+fi
+
+log "Syncing filesystem..."
+sync
+
+log "Unmounting: $target"
+
+# Try normal unmount first, then lazy
+umount "$target" 2>/dev/null || umount -l "$target" || error "Failed to unmount"
+
+# Remove from tracking
+if [[ -f "$MOUNT_OPTS_DIR/active" ]]; then
+    sed -i "\|$target|d" "$MOUNT_OPTS_DIR/active" 2>/dev/null || true
+fi
+
+# Clean mount point if it's ours
+if [[ "$target" == /mnt/shadow/* ]]; then
+    rmdir "$target" 2>/dev/null || true
+fi
+
+log "✓ Safely unmounted: $target"

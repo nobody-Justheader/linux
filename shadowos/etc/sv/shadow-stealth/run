@@ -1,0 +1,27 @@
+#!/bin/sh
+# ShadowOS Stealth Auto-Apply runit service
+# /etc/sv/shadow-stealth/run
+#
+# Randomizes MAC address on boot
+
+exec 2>&1
+
+# Wait for network interfaces to be available
+sleep 5
+
+# Randomize identity on all wireless interfaces
+for iface in /sys/class/net/wlan*; do
+    [ -d "$iface" ] || continue
+    ifname=$(basename "$iface")
+    /usr/bin/shadow-stealth randomize "$ifname" 2>&1 || true
+done
+
+# Also randomize wired if present
+for iface in /sys/class/net/eth*; do
+    [ -d "$iface" ] || continue
+    ifname=$(basename "$iface")
+    /usr/bin/shadow-stealth randomize "$ifname" 2>&1 || true
+done
+
+# Service completes (one-shot)
+exec sleep infinity

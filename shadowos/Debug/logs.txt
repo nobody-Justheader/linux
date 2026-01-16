@@ -1,0 +1,84 @@
+[H[J[1;1Herror: no suitable video mode found.
+[?25l[m[H[J[1;1H[2;26HGNU GRUB  version 2.12-9+kali1
+
+[m[4;2H+----------------------------------------------------------------------------+[5;2H|[5;79H|[6;2H|[6;79H|[7;2H|[7;79H|[8;2H|[8;79H|[9;2H|[9;79H|[10;2H|[10;79H|[11;2H|[11;79H|[12;2H|[12;79H|[13;2H|[13;79H|[14;2H|[14;79H|[15;2H|[15;79H|[16;2H|[16;79H|[17;2H+----------------------------------------------------------------------------+[m[18;2H[19;2H[m     Use the ^ and v keys to select which entry is highlighted.          
+      Press enter to boot the selected OS, `e' to edit the commands       
+      before booting or `c' for a command-line.                           [5;80H [7m[5;3H*ShadowOS Live                                                              [m[5;78H[m[m[6;3H ShadowOS Live (Safe Graphics - nomodeset)                                  [m[6;78H[m[m[7;3H ShadowOS Live (Debug)                                                      [m[7;78H[m[m[8;3H                                                                            [m[8;78H[m[m[9;3H                                                                            [m[9;78H[m[m[10;3H                                                                            [m[10;78H[m[m[11;3H                                                                            [m[11;78H[m[m[12;3H                                                                            [m[12;78H[m[m[13;3H                                                                            [m[13;78H[m[m[14;3H                                                                            [m[14;78H[m[m[15;3H                                                                            [m[15;78H[m[m[16;3H                                                                            [m[16;78H[m[16;80H [5;78H[22;1H   The highlighted entry will be executed automatically in 5s.                 [5;78H[22;1H   The highlighted entry will be executed automatically in 4s.                 [5;78H[22;1H   The highlighted entry will be executed automatically in 3s.                 [5;78H[22;1H   The highlighted entry will be executed automatically in 2s.                 [5;78H[22;1H   The highlighted entry will be executed automatically in 1s.                 [5;78H[22;1H                                                                               [23;1H                                                                               [5;78H[m[5;3H ShadowOS Live                                                              [m[5;78H[m[7m[6;3H*ShadowOS Live (Safe Graphics - nomodeset)                                  [m[6;78H[m[?25h[H[J[1;1H[H[J[1;1Hlocalhost [127.0.0.1] 6699 (?) : Connection refused
+localhost [127.0.0.1] 6699 (?) : Connection refused
+localhost [127.0.0.1] 6699 (?) : Connection refused
+localhost [127.0.0.1] 6699 (?) : Connection refused
+localhost [127.0.0.1] 6699 (?) : Connection refused
+localhost [127.0.0.1] 6699 (?) : Connection refused
+localhost [127.0.0.1] 6699 (?) : Connection refused
+localhost [127.0.0.1] 6699 (?) : Connection refused
+localhost [127.0.0.1] 6699 (?) : Connection refused
+localhost [127.0.0.1] 6699 (?) : Connection refused
+localhost [127.0.0.1] 6699 (?) : Connection refused
+localhost [127.0.0.1] 6699 (?) : Connection refused
+localhost [127.0.0.1] 6699 (?) : Connection refused
+localhost [127.0.0.1] 6699 (?) : Connection refused
+localhost [127.0.0.1] 6699 (?) : Connection refused
+localhost [127.0.0.1] 6699 (?) : Connection refused
+localhost [127.0.0.1] 6699 (?) : Connection refused
+localhost [127.0.0.1] 6699 (?) : Connection refused
+localhost [127.0.0.1] 6699 (?) : Connection refused
+localhost [127.0.0.1] 6699 (?) : Connection refused
+localhost [127.0.0.1] 6699 (?) : Connection refused
+localhost [127.0.0.1] 6699 (?) : Connection refused
+localhost [127.0.0.1] 6699 (?) : Connection refused
+localhost [127.0.0.1] 6699 (?) : Connection refused
+localhost [127.0.0.1] 6699 (?) : Connection refused
+localhost [127.0.0.1] 6699 (?) : Connection refused
+localhost [127.0.0.1] 6699 (?) : Connection refused
+localhost [127.0.0.1] 6699 (?) : Connection refused
+localhost [127.0.0.1] 6699 (?) : Connection refused
+localhost [127.0.0.1] 6699 (?) : Connection refused
+localhost [127.0.0.1] 6699 (?) : Connection refused
+localhost [127.0.0.1] 6699 (?) : Connection refused
+localhost [127.0.0.1] 6699 (?) : Connection refused
+localhost [127.0.0.1] 6699 (?) : Connection refused
+localhost [127.0.0.1] 6699 (?) : Connection refused
+localhost [127.0.0.1] 6699 (?) open
+[H[J[1;1Herror: no suitable video mode found.
+[?25l[m[H[J[1;1H[2;26HGNU GRUB  version 2.12-9+kali1
+
+[m[4;2H+----------------------------------------------------------------------------+[5;2H|[5;79H|[6;2H|[6;79H|[7;2H|[7;79H|[8;2H|[8;79H|[9;2H|[9;79H|[10;2H|[10;79H|[11;2H|[11;79H|[12;2H|[12;79H|[13;2H|[13;79H|[14;2H|[14;79H|[15;2H|[15;79H|[16;2H|[16;79H|[17;2H+----------------------------------------------------------------------------+[m[18;2H[19;2H[m     Use the ^ and v keys to select which entry is highlighted.          
+      Press enter to boot the selected OS, `e' to edit the commands       
+      before booting or `c' for a command-line.                           [5;80H [7m[5;3H*ShadowOS Live                                                              [m[5;78H[m[m[6;3H ShadowOS Live (Safe Graphics - nomodeset)                                  [m[6;78H[m[m[7;3H ShadowOS Live (Debug)                                                      [m[7;78H[m[m[8;3H                                                                            [m[8;78H[m[m[9;3H                                                                            [m[9;78H[m[m[10;3H                                                                            [m[10;78H[m[m[11;3H                                                                            [m[11;78H[m[m[12;3H                                                                            [m[12;78H[m[m[13;3H                                                                            [m[13;78H[m[m[14;3H                                                                            [m[14;78H[m[m[15;3H                                                                            [m[15;78H[m[m[16;3H                                                                            [m[16;78H[m[16;80H [5;78H[22;1H   The highlighted entry will be executed automatically in 5s.                 [5;78H[22;1H   The highlighted entry will be executed automatically in 4s.                 [5;78H[22;1H   The highlighted entry will be executed automatically in 3s.                 [5;78H[22;1H   The highlighted entry will be executed automatically in 2s.                 [5;78H[22;1H                                                                               [23;1H                                                                               [5;78H[m[5;3H ShadowOS Live                                                              [m[5;78H[m[7m[6;3H*ShadowOS Live (Safe Graphics - nomodeset)                                  [m[6;78H[m[?25h[H[J[1;1H[H[J[1;1H
+Debian GNU/Linux 12 shadowos ttyS0
+
+shadowos login: === [ShadowOS Debug Start] ===
+--- lspci -nnk (Video) ---
+--- Kernel DRM Modules ---
+drm_ttm_helper         16384  0
+ttm                    94208  1 drm_ttm_helper
+vboxguest              49152  0
+drm_kms_helper        212992  0
+drm                   614400  3 drm_kms_helper,drm_ttm_helper,ttm
+--- Xorg Log (tail) ---
+=== [ShadowOS Debug End] ===
+[H[J[1;1Herror: no suitable video mode found.
+[?25l[m[H[J[1;1H[2;26HGNU GRUB  version 2.12-9+kali1
+
+[m[4;2H+----------------------------------------------------------------------------+[5;2H|[5;79H|[6;2H|[6;79H|[7;2H|[7;79H|[8;2H|[8;79H|[9;2H|[9;79H|[10;2H|[10;79H|[11;2H|[11;79H|[12;2H|[12;79H|[13;2H|[13;79H|[14;2H|[14;79H|[15;2H|[15;79H|[16;2H|[16;79H|[17;2H+----------------------------------------------------------------------------+[m[18;2H[19;2H[m     Use the ^ and v keys to select which entry is highlighted.          
+      Press enter to boot the selected OS, `e' to edit the commands       
+      before booting or `c' for a command-line.                           [5;80H [7m[5;3H*ShadowOS Live                                                              [m[5;78H[m[m[6;3H ShadowOS Live (Safe Graphics - nomodeset)                                  [m[6;78H[m[m[7;3H ShadowOS Live (Debug)                                                      [m[7;78H[m[m[8;3H                                                                            [m[8;78H[m[m[9;3H                                                                            [m[9;78H[m[m[10;3H                                                                            [m[10;78H[m[m[11;3H                                                                            [m[11;78H[m[m[12;3H                                                                            [m[12;78H[m[m[13;3H                                                                            [m[13;78H[m[m[14;3H                                                                            [m[14;78H[m[m[15;3H                                                                            [m[15;78H[m[m[16;3H                                                                            [m[16;78H[m[16;80H [5;78H[22;1H   The highlighted entry will be executed automatically in 5s.                 [5;78H[22;1H   The highlighted entry will be executed automatically in 4s.                 [5;78H[22;1H   The highlighted entry will be executed automatically in 3s.                 [5;78H[22;1H   The highlighted entry will be executed automatically in 2s.                 [5;78H[22;1H                                                                               [23;1H                                                                               [5;78H[m[5;3H ShadowOS Live                                                              [m[5;78H[m[7m[6;3H*ShadowOS Live (Safe Graphics - nomodeset)                                  [m[6;78H[m[m[6;3H ShadowOS Live (Safe Graphics - nomodeset)                                  [m[6;78H[m[7m[5;3H*ShadowOS Live                                                              [m[5;78H[m[?25h[H[J[1;1H[H[J[1;1H[    3.389020] [drm:vmw_host_printf [vmwgfx]] *ERROR* Failed to send host log message.
+
+Debian GNU/Linux 12 shadowos ttyS0
+
+shadowos login: === [ShadowOS Debug Start] ===
+--- lspci -nnk (Video) ---
+--- Kernel DRM Modules ---
+vmwgfx                372736  0
+drm_ttm_helper         16384  1 vmwgfx
+ttm                    94208  2 vmwgfx,drm_ttm_helper
+drm_kms_helper        212992  3 vmwgfx
+vboxguest              49152  0
+drm                   614400  5 vmwgfx,drm_kms_helper,drm_ttm_helper,ttm
+--- Xorg Log (tail) ---
+=== [ShadowOS Debug End] ===
+[[0;1;31mFAILED[0m] Failed unmounting [0;1;39mrun-live…dium.mount[0m - /run/live/medium.
+[  148.520189] (sd-umount)[3274]: Failed to unmount /run/live/medium: Device or resource busy
+[  148.524444] systemd-shutdown[1]: Could not detach loopback /dev/loop0: Device or resource busy
+[  148.527312] systemd-shutdown[1]: Failed to finalize file systems, loop devices, ignoring.
+[  148.614070] reboot: Power down

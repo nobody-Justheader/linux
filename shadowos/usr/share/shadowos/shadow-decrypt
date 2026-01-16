@@ -1,0 +1,175 @@
+#!/bin/sh
+#
+# shadow-decrypt - Early boot script to decrypt hidden volume
+# /usr/share/shadowos/shadow-decrypt
+#
+# Called from initramfs to decrypt the hidden LUKS volume
+#
+
+# Colors for boot display
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+# Device detection
+find_shadow_partition() {
+    # Look for partition labeled SHADOW_CRYPT or with specific UUID
+    local part=""
+    
+    for dev in /dev/sd?2 /dev/nvme?n1p2 /dev/mmcblk?p2; do
+        [ -b "$dev" ] || continue
+        
+        # Check for LUKS signature
+        if cryptsetup isLuks "$dev" 2>/dev/null; then
+            echo "$dev"
+            return 0
+        fi
+    done
+    
+    return 1
+}
+
+# Check if hidden header exists on USB
+find_hidden_header() {
+    # Header can be stored on:
+    # 1. Separate USB partition
+    # 2. Fixed location on boot media
+    # 3. Keyfile partition
+    
+    for header_loc in \
+        /boot/shadow/hidden.header \
+        /media/keyfile/shadow.header \
+        /run/cryptsetup/shadow.header; do
+        [ -f "$header_loc" ] && echo "$header_loc" && return 0
+    done
+    
+    # Check USB partitions for header file
+    for dev in /dev/sd?1 /dev/nvme?n1p1; do
+        [ -b "$dev" ] || continue
+        
+        mkdir -p /tmp/header_check
+        if mount -t vfat -o ro "$dev" /tmp/header_check 2>/dev/null; then
+            if [ -f /tmp/header_check/.shadow/header.bin ]; then
+                cp /tmp/header_check/.shadow/header.bin /tmp/shadow-header.bin
+                umount /tmp/header_check
+                echo "/tmp/shadow-header.bin"
+                return 0
+            fi
+            umount /tmp/header_check
+        fi
+    done
+    
+    return 1
+}
+
+# Main decryption routine
+decrypt_hidden() {
+    local device="$1"
+    local header="$2"
+    local target="shadow_root"
+    
+    echo -e "${BLUE}"
+    echo "╔═══════════════════════════════════════════════════════════════╗"
+    echo "║                     ShadowOS Boot                             ║"
+    echo "╚═══════════════════════════════════════════════════════════════╝"
+    echo -e "${NC}"
+    
+    echo ""
+    echo -e "${GREEN}Hidden volume detected${NC}"
+    echo ""
+    
+    # Prompt for password
+    local attempts=3
+    while [ $attempts -gt 0 ]; do
+        echo -n "Enter hidden volume password: "
+        read -s password
+        echo ""
+        
+        # Try to open with detached header
+        if [ -n "$header" ]; then
+            echo "$password" | cryptsetup open \
+                --header "$header" \
+                --type luks2 \
+                "$device" "$target" 2>/dev/null
+        else
+            # Standard LUKS without detached header
+            echo "$password" | cryptsetup open \
+                --type luks2 \
+                "$device" "$target" 2>/dev/null
+        fi
+        
+        if [ $? -eq 0 ]; then
+            echo -e "${GREEN}[✓] Hidden volume decrypted${NC}"
+            return 0
+        fi
+        
+        attempts=$((attempts - 1))
+        if [ $attempts -gt 0 ]; then
+            echo -e "${RED}[!] Invalid password. $attempts attempts remaining.${NC}"
+        fi
+    done
+    
+    echo -e "${RED}[!] Decryption failed. Falling back to decoy boot.${NC}"
+    return 1
+}
+
+# Decoy boot (normal-looking system)
+boot_decoy() {
+    echo ""
+    echo "Booting system..."
+    
+    # This would boot the outer (decoy) volume
+    # Making it look like a normal system
+    exec switch_root /mnt/decoy /sbin/init
+}
+
+# Hidden boot
+boot_hidden() {
+    echo ""
+    echo -e "${GREEN}Entering stealth mode...${NC}"
+    
+    # Mount hidden root
+    mount /dev/mapper/shadow_root /mnt/root
+    
+    # Pivot to hidden system
+    exec switch_root /mnt/root /sbin/init
+}
+
+# =============================================================================
+# MAIN
+# =============================================================================
+
+# Parse kernel command line for shadow boot flag
+shadow_boot=0
+for param in $(cat /proc/cmdline); do
+    case "$param" in
+        shadowboot|shadow_boot|hidden_boot)
+            shadow_boot=1
+            ;;
+    esac
+done
+
+# If no shadow boot flag, boot decoy
+if [ $shadow_boot -eq 0 ]; then
+    boot_decoy
+    exit 0
+fi
+
+# Find encrypted partition
+device=$(find_shadow_partition)
+if [ -z "$device" ]; then
+    echo "[!] No encrypted partition found"
+    boot_decoy
+    exit 1
+fi
+
+# Find hidden header
+header=$(find_hidden_header)
+
+# Decrypt and boot
+if decrypt_hidden "$device" "$header"; then
+    boot_hidden
+else
+    boot_decoy
+fi

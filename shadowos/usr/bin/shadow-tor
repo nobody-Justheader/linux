@@ -1,0 +1,349 @@
+#!/bin/bash
+#
+# shadow-tor - ShadowOS TOR Integration
+# /usr/bin/shadow-tor
+#
+# Manages TOR for anonymous networking
+#
+
+set -euo pipefail
+
+VERSION="1.0.0"
+
+TOR_DATA="/var/lib/tor"
+TOR_CONFIG="/etc/tor/torrc"
+TOR_SOCKS_PORT=9050
+TOR_CONTROL_PORT=9051
+
+# =============================================================================
+# TOR CONFIGURATION
+# =============================================================================
+
+generate_torrc() {
+    mkdir -p /etc/tor "$TOR_DATA"
+    chmod 700 "$TOR_DATA"
+    
+    cat > "$TOR_CONFIG" << EOF
+# ShadowOS TOR Configuration
+# Auto-generated - edit with care
+
+# Basic settings
+SocksPort $TOR_SOCKS_PORT
+ControlPort $TOR_CONTROL_PORT
+
+# Data directory
+DataDirectory $TOR_DATA
+
+# Logging
+Log notice file /var/log/tor/notices.log
+
+# Performance
+NumEntryGuards 3
+KeepalivePeriod 60
+
+# Security
+SafeSocks 1
+TestSocks 0
+WarnUnsafeSocks 1
+RejectPlaintext 1
+
+# Automatic bridge fetching (for censored networks)
+UseBridges 0
+
+# Circuit settings
+CircuitBuildTimeout 30
+LearnCircuitBuildTimeout 1
+MaxCircuitDirtiness 600
+EOF
+
+    mkdir -p /var/log/tor
+    touch /var/log/tor/notices.log
+    chmod 600 /var/log/tor/notices.log
+    
+    echo "[+] TOR configuration generated: $TOR_CONFIG"
+}
+
+# =============================================================================
+# TOR CONTROL
+# =============================================================================
+
+start_tor() {
+    echo "[*] Starting TOR..."
+    
+    # Generate config if missing
+    [[ ! -f "$TOR_CONFIG" ]] && generate_torrc
+    
+    # Start via runit if available
+    if [[ -d /etc/runit/sv/tor ]]; then
+        sv start tor
+    else
+        # Manual start
+        tor -f "$TOR_CONFIG" &
+        echo $! > /var/run/tor.pid
+    fi
+    
+    # Wait for TOR to bootstrap
+    echo "[*] Waiting for TOR to bootstrap..."
+    local attempts=0
+    while [[ $attempts -lt 30 ]]; do
+        if curl --socks5 127.0.0.1:$TOR_SOCKS_PORT -s https://check.torproject.org/api/ip 2>/dev/null | grep -q '"IsTor":true'; then
+            echo "[+] TOR connected!"
+            show_identity
+            return 0
+        fi
+        sleep 2
+        ((attempts++))
+        echo -n "."
+    done
+    
+    echo ""
+    echo "[!] TOR bootstrap timeout - check logs: /var/log/tor/notices.log"
+    return 1
+}
+
+stop_tor() {
+    echo "[*] Stopping TOR..."
+    
+    if [[ -d /etc/runit/sv/tor ]]; then
+        sv stop tor
+    else
+        [[ -f /var/run/tor.pid ]] && kill $(cat /var/run/tor.pid) 2>/dev/null
+        killall tor 2>/dev/null || true
+    fi
+    
+    echo "[+] TOR stopped"
+}
+
+restart_tor() {
+    stop_tor
+    sleep 2
+    start_tor
+}
+
+new_identity() {
+    echo "[*] Requesting new TOR identity..."
+    
+    # Send NEWNYM signal via control port
+    if command -v nc &>/dev/null; then
+        echo -e 'AUTHENTICATE ""\r\nSIGNAL NEWNYM\r\nQUIT' | nc 127.0.0.1 $TOR_CONTROL_PORT
+    elif command -v torctl &>/dev/null; then
+        torctl signal newnym
+    else
+        # Fallback: restart TOR
+        restart_tor
+        return
+    fi
+    
+    sleep 3
+    echo "[+] New identity assigned"
+    show_identity
+}
+
+# =============================================================================
+# STATUS & IDENTITY
+# =============================================================================
+
+show_identity() {
+    echo ""
+    echo "╔════════════════════════════════════════════════════════════╗"
+    echo "║                    TOR Identity                            ║"
+    echo "╠════════════════════════════════════════════════════════════╣"
+    
+    local tor_check
+    tor_check=$(curl --socks5 127.0.0.1:$TOR_SOCKS_PORT -s https://check.torproject.org/api/ip 2>/dev/null || echo '{"IsTor":false}')
+    
+    if echo "$tor_check" | grep -q '"IsTor":true'; then
+        local ip
+        ip=$(echo "$tor_check" | grep -oP '"IP":"[^"]+' | cut -d'"' -f4)
+        printf "║  Status:     %-46s ║\n" "✓ CONNECTED via TOR"
+        printf "║  Exit IP:    %-46s ║\n" "$ip"
+    else
+        printf "║  Status:     %-46s ║\n" "✗ NOT CONNECTED"
+    fi
+    
+    echo "╚════════════════════════════════════════════════════════════╝"
+}
+
+show_status() {
+    echo "╔════════════════════════════════════════════════════════════╗"
+    echo "║                  ShadowOS TOR Status                       ║"
+    echo "╠════════════════════════════════════════════════════════════╣"
+    
+    # Check if TOR is running
+    if pgrep -x tor &>/dev/null; then
+        printf "║  TOR Daemon: %-46s ║\n" "Running"
+    else
+        printf "║  TOR Daemon: %-46s ║\n" "Stopped"
+        echo "╚════════════════════════════════════════════════════════════╝"
+        return
+    fi
+    
+    printf "║  SOCKS Port: %-46s ║\n" "$TOR_SOCKS_PORT"
+    printf "║  Control:    %-46s ║\n" "$TOR_CONTROL_PORT"
+    
+    echo "╠════════════════════════════════════════════════════════════╣"
+    
+    # Check TOR connectivity
+    local tor_check
+    tor_check=$(curl --socks5 127.0.0.1:$TOR_SOCKS_PORT -s --max-time 10 https://check.torproject.org/api/ip 2>/dev/null || echo '{"IsTor":false}')
+    
+    if echo "$tor_check" | grep -q '"IsTor":true'; then
+        local ip
+        ip=$(echo "$tor_check" | grep -oP '"IP":"[^"]+' | cut -d'"' -f4)
+        printf "║  Connected:  %-46s ║\n" "✓ YES"
+        printf "║  Exit IP:    %-46s ║\n" "$ip"
+    else
+        printf "║  Connected:  %-46s ║\n" "✗ NO (bootstrapping?)"
+    fi
+    
+    echo "╚════════════════════════════════════════════════════════════╝"
+}
+
+# =============================================================================
+# TRANSPARENT PROXY (Route all traffic through TOR)
+# =============================================================================
+
+enable_transparent() {
+    echo "[*] Enabling transparent TOR proxy..."
+    echo "[!] WARNING: This will route ALL traffic through TOR"
+    
+    # Add transparent proxy settings to torrc
+    cat >> "$TOR_CONFIG" << EOF
+
+# Transparent proxy settings
+VirtualAddrNetworkIPv4 10.192.0.0/10
+AutomapHostsOnResolve 1
+TransPort 9040
+DNSPort 5353
+EOF
+
+    # Setup iptables to redirect traffic
+    local tor_uid
+    tor_uid=$(id -u tor 2>/dev/null || echo "debian-tor")
+    
+    # Flush existing rules
+    iptables -F
+    iptables -t nat -F
+    
+    # Allow loopback
+    iptables -A OUTPUT -m state --state ESTABLISHED -j ACCEPT
+    iptables -A OUTPUT -o lo -j ACCEPT
+    
+    # Allow TOR itself
+    iptables -A OUTPUT -m owner --uid-owner $tor_uid -j ACCEPT
+    
+    # Redirect DNS to TOR
+    iptables -t nat -A OUTPUT -p udp --dport 53 -j REDIRECT --to-ports 5353
+    
+    # Redirect TCP to TOR transparent proxy
+    iptables -t nat -A OUTPUT -p tcp --syn -j REDIRECT --to-ports 9040
+    
+    # Restart TOR with new config
+    restart_tor
+    
+    echo "[+] Transparent proxy enabled - ALL traffic goes through TOR"
+}
+
+disable_transparent() {
+    echo "[*] Disabling transparent TOR proxy..."
+    
+    # Flush iptables
+    iptables -F
+    iptables -t nat -F
+    iptables -P OUTPUT ACCEPT
+    
+    # Regenerate clean config
+    generate_torrc
+    restart_tor
+    
+    echo "[+] Transparent proxy disabled"
+}
+
+# =============================================================================
+# PROXY CONFIGURATION
+# =============================================================================
+
+show_proxy_config() {
+    cat << EOF
+╔════════════════════════════════════════════════════════════╗
+║                    TOR Proxy Settings                      ║
+╠════════════════════════════════════════════════════════════╣
+║                                                            ║
+║  SOCKS5 Proxy:  127.0.0.1:$TOR_SOCKS_PORT                        ║
+║                                                            ║
+║  For curl:                                                 ║
+║    curl --socks5 127.0.0.1:$TOR_SOCKS_PORT https://example.com   ║
+║                                                            ║
+║  For wget:                                                 ║
+║    export https_proxy=socks5://127.0.0.1:$TOR_SOCKS_PORT         ║
+║    wget https://example.com                                ║
+║                                                            ║
+║  For Firefox: Settings > Network > SOCKS5 127.0.0.1:$TOR_SOCKS_PORT║
+║                                                            ║
+║  Alias (add to shell):                                     ║
+║    alias torify='torsocks'                                 ║
+║    alias curl-tor='curl --socks5 127.0.0.1:$TOR_SOCKS_PORT'      ║
+║                                                            ║
+╚════════════════════════════════════════════════════════════╝
+EOF
+}
+
+# =============================================================================
+# MAIN
+# =============================================================================
+
+case "${1:-status}" in
+    start)
+        start_tor
+        ;;
+    stop)
+        stop_tor
+        ;;
+    restart)
+        restart_tor
+        ;;
+    status)
+        show_status
+        ;;
+    identity|id)
+        show_identity
+        ;;
+    new|newid|newnym)
+        new_identity
+        ;;
+    transparent|trans)
+        enable_transparent
+        ;;
+    notransparent|notrans)
+        disable_transparent
+        ;;
+    proxy|config)
+        show_proxy_config
+        ;;
+    *)
+        cat << 'EOF'
+shadow-tor - ShadowOS TOR Management
+
+Usage: shadow-tor <command>
+
+Commands:
+  start         Start TOR daemon
+  stop          Stop TOR daemon
+  restart       Restart TOR daemon
+  status        Show TOR status
+  identity      Show current TOR exit IP
+  new           Request new TOR identity
+  transparent   Route ALL traffic through TOR
+  notransparent Disable transparent proxy
+  proxy         Show proxy configuration
+
+Quick usage:
+  shadow-tor start     # Start TOR
+  shadow-tor new       # Get new identity (new exit IP)
+  
+Use programs with TOR:
+  torsocks <command>   # Run any command through TOR
+  curl --socks5 127.0.0.1:9050 https://example.com
+EOF
+        ;;
+esac

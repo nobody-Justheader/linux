@@ -1,0 +1,215 @@
+#!/bin/bash
+#
+# smove - ShadowOS Secure Move
+# /usr/bin/smove
+#
+# Drop-in replacement for 'mv' that performs traceless moves:
+# - Securely copies file to destination (no metadata)
+# - Securely deletes source file (irrecoverable)
+# - Compatible with standard mv arguments
+#
+
+set -euo pipefail
+
+VERSION="1.0.0"
+
+# =============================================================================
+# CONFIGURATION
+# =============================================================================
+
+# Secure deletion passes
+DELETE_PASSES="${SHADOWOS_DELETE_PASSES:-3}"
+
+# Always scrub metadata
+SCRUB_METADATA="${SHADOWOS_SCRUB:-true}"
+
+# Silent mode
+QUIET="${SHADOWOS_QUIET:-false}"
+
+# =============================================================================
+# HELPER FUNCTIONS
+# =============================================================================
+
+log() {
+    $QUIET || echo "[smove] $*" >&2
+}
+
+error() {
+    echo "[smove] ERROR: $*" >&2
+    exit 1
+}
+
+# Securely delete a file
+secure_delete_file() {
+    local file="$1"
+    
+    if command -v shred &>/dev/null; then
+        shred -fzun $DELETE_PASSES "$file" 2>/dev/null
+    else
+        # Fallback: manual overwrite
+        local size
+        size=$(stat -c%s "$file" 2>/dev/null || echo 0)
+        local blocks=$(( size / 4096 + 1 ))
+        
+        for i in $(seq 1 $DELETE_PASSES); do
+            dd if=/dev/urandom of="$file" bs=4K count=$blocks conv=notrunc 2>/dev/null
+        done
+        dd if=/dev/zero of="$file" bs=4K count=$blocks conv=notrunc 2>/dev/null
+        rm -f "$file"
+    fi
+}
+
+# Securely delete a directory
+secure_delete_dir() {
+    local dir="$1"
+    
+    # Delete all files first
+    find "$dir" -type f | while read -r file; do
+        secure_delete_file "$file"
+    done
+    
+    # Remove directory structure
+    rm -rf "$dir"
+}
+
+# =============================================================================
+# ARGUMENT PARSING (mv-compatible)
+# =============================================================================
+
+FORCE=false
+INTERACTIVE=false
+VERBOSE=false
+NO_CLOBBER=false
+SOURCES=()
+DEST=""
+
+show_help() {
+    cat << 'EOF'
+smove - ShadowOS Secure Move (mv replacement)
+
+Moves files WITHOUT leaving forensic traces:
+  - Copies to destination (metadata stripped)
+  - Securely wipes source (irrecoverable)
+  - No shell history logging
+
+Usage: smove [OPTIONS] SOURCE... DEST
+       mv [OPTIONS] SOURCE... DEST   (when aliased)
+
+Options:
+  -f, --force           Overwrite without prompting
+  -i, --interactive     Prompt before overwrite
+  -n, --no-clobber      Don't overwrite existing
+  -v, --verbose         Show what is being done
+  --help                Show this help
+  --version             Show version
+
+To use original mv: \mv source dest
+
+Environment:
+  SHADOWOS_DELETE_PASSES=7   Number of overwrite passes (default: 3)
+  SHADOWOS_SCRUB=false       Disable metadata scrubbing
+  SHADOWOS_QUIET=true        Suppress messages
+EOF
+    exit 0
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -f|--force)
+            FORCE=true
+            shift
+            ;;
+        -i|--interactive)
+            INTERACTIVE=true
+            shift
+            ;;
+        -n|--no-clobber)
+            NO_CLOBBER=true
+            shift
+            ;;
+        -v|--verbose)
+            VERBOSE=true
+            QUIET=false
+            shift
+            ;;
+        --help)
+            show_help
+            ;;
+        --version)
+            echo "smove (ShadowOS) $VERSION"
+            exit 0
+            ;;
+        --)
+            shift
+            break
+            ;;
+        -*)
+            error "Unknown option: $1"
+            ;;
+        *)
+            SOURCES+=("$1")
+            shift
+            ;;
+    esac
+done
+
+# Add remaining args as sources
+SOURCES+=("$@")
+
+# Last arg is destination
+if [[ ${#SOURCES[@]} -lt 2 ]]; then
+    error "Missing destination. Usage: smove SOURCE... DEST"
+fi
+
+DEST="${SOURCES[-1]}"
+unset 'SOURCES[-1]'
+
+# =============================================================================
+# MAIN LOGIC
+# =============================================================================
+
+for src in "${SOURCES[@]}"; do
+    # Determine destination path
+    local dst_path="$DEST"
+    if [[ -d "$DEST" ]]; then
+        dst_path="$DEST/$(basename "$src")"
+    fi
+    
+    # Check for overwrite
+    if [[ -e "$dst_path" ]]; then
+        if $NO_CLOBBER; then
+            $VERBOSE && log "Skipping existing: $dst_path"
+            continue
+        elif $INTERACTIVE; then
+            read -p "Overwrite '$dst_path'? [y/N] " answer
+            [[ "$answer" != "y" && "$answer" != "Y" ]] && continue
+        fi
+    fi
+    
+    if [[ -d "$src" ]]; then
+        $VERBOSE && log "Moving directory: $src -> $dst_path"
+        
+        # Use scopy for the actual copy
+        scopy -r ${VERBOSE:+-v} "$src" "$dst_path"
+        
+        # Securely delete source directory
+        $VERBOSE && log "Securely wiping source directory..."
+        secure_delete_dir "$src"
+        
+    elif [[ -f "$src" ]]; then
+        $VERBOSE && log "Moving: $src -> $dst_path"
+        
+        # Use scopy for the actual copy
+        scopy ${VERBOSE:+-v} "$src" "$dst_path"
+        
+        # Securely delete source file
+        $VERBOSE && log "Securely wiping source..."
+        secure_delete_file "$src"
+        
+    else
+        error "Source not found: $src"
+    fi
+done
+
+$VERBOSE && log "Move complete (source securely wiped)"
+exit 0

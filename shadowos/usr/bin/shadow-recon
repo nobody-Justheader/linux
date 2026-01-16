@@ -1,0 +1,200 @@
+#!/bin/bash
+#
+# shadow-recon - Reconnaissance Automation
+# /usr/bin/shadow-recon
+#
+# Automated target reconnaissance with OSINT and scanning
+#
+
+set -euo pipefail
+
+VERSION="1.0.0"
+OUTPUT_DIR="/shadow/recon"
+
+log() { echo "[recon] $*"; }
+error() { echo "[recon] ERROR: $*" >&2; exit 1; }
+
+ensure_output() {
+    mkdir -p "$OUTPUT_DIR"
+}
+
+# Full domain recon
+cmd_domain() {
+    local domain="$1"
+    local outdir="$OUTPUT_DIR/$domain"
+    
+    mkdir -p "$outdir"
+    log "Domain reconnaissance: $domain"
+    log "Output: $outdir/"
+    echo ""
+    
+    # DNS records
+    log "Fetching DNS records..."
+    {
+        echo "=== A Records ==="
+        dig +short A "$domain"
+        echo ""
+        echo "=== MX Records ==="
+        dig +short MX "$domain"
+        echo ""
+        echo "=== NS Records ==="
+        dig +short NS "$domain"
+        echo ""
+        echo "=== TXT Records ==="
+        dig +short TXT "$domain"
+    } | tee "$outdir/dns.txt"
+    
+    # WHOIS
+    log "WHOIS lookup..."
+    whois "$domain" > "$outdir/whois.txt" 2>/dev/null || true
+    
+    # Subdomain enumeration
+    if command -v amass &>/dev/null; then
+        log "Subdomain enumeration (amass)..."
+        timeout 300 amass enum -passive -d "$domain" -o "$outdir/subdomains.txt" 2>/dev/null &
+    elif command -v subfinder &>/dev/null; then
+        log "Subdomain enumeration (subfinder)..."
+        subfinder -d "$domain" -o "$outdir/subdomains.txt" 2>/dev/null &
+    fi
+    
+    # Web technologies
+    if command -v whatweb &>/dev/null; then
+        log "Web technology detection..."
+        whatweb -a 3 "$domain" > "$outdir/whatweb.txt" 2>/dev/null || true
+    fi
+    
+    # SSL/TLS info
+    log "SSL certificate info..."
+    echo | openssl s_client -connect "$domain:443" 2>/dev/null | \
+        openssl x509 -noout -text 2>/dev/null | \
+        grep -E "Subject:|Issuer:|Not Before|Not After" > "$outdir/ssl.txt" || true
+    
+    wait
+    
+    echo ""
+    log "Recon complete: $outdir/"
+    ls -la "$outdir/"
+}
+
+# IP reconnaissance
+cmd_ip() {
+    local ip="$1"
+    local outdir="$OUTPUT_DIR/ip_$ip"
+    
+    mkdir -p "$outdir"
+    log "IP reconnaissance: $ip"
+    echo ""
+    
+    # Reverse DNS
+    log "Reverse DNS..."
+    dig +short -x "$ip" | tee "$outdir/rdns.txt"
+    
+    # Geolocation
+    log "Geolocation..."
+    curl -s "http://ip-api.com/json/$ip" | jq . > "$outdir/geo.json" 2>/dev/null || true
+    
+    # Port scan
+    log "Port scan..."
+    nmap -T4 -F "$ip" -oN "$outdir/ports.txt" 2>/dev/null || true
+    
+    echo ""
+    log "Recon complete: $outdir/"
+}
+
+# Person OSINT (ethical use only)
+cmd_person() {
+    local name="$1"
+    local outdir="$OUTPUT_DIR/person_$(echo "$name" | tr ' ' '_')"
+    
+    mkdir -p "$outdir"
+    log "Person lookup: $name"
+    log "⚠️  Use ethically and legally"
+    echo ""
+    
+    # Username search
+    if command -v sherlock &>/dev/null; then
+        log "Username search..."
+        sherlock "$name" --output "$outdir/sherlock.txt" 2>/dev/null &
+    fi
+    
+    # Email patterns
+    local firstname=$(echo "$name" | cut -d' ' -f1 | tr '[:upper:]' '[:lower:]')
+    local lastname=$(echo "$name" | cut -d' ' -f2 | tr '[:upper:]' '[:lower:]')
+    
+    cat > "$outdir/email_patterns.txt" << EOF
+Common email patterns for: $name
+
+${firstname}.${lastname}@domain.com
+${firstname}${lastname}@domain.com
+${firstname}_${lastname}@domain.com
+${firstname:0:1}${lastname}@domain.com
+${firstname}@domain.com
+${lastname}@domain.com
+EOF
+
+    wait
+    
+    log "Results in: $outdir/"
+}
+
+# Network infrastructure recon
+cmd_infra() {
+    local target="$1"
+    local outdir="$OUTPUT_DIR/infra_$(echo "$target" | tr '/' '_')"
+    
+    mkdir -p "$outdir"
+    log "Infrastructure recon: $target"
+    echo ""
+    
+    # ASN lookup
+    log "ASN lookup..."
+    whois -h whois.cymru.com " -v $target" > "$outdir/asn.txt" 2>/dev/null || true
+    
+    # Traceroute
+    log "Traceroute..."
+    traceroute -n "$target" > "$outdir/traceroute.txt" 2>/dev/null || true
+    
+    # BGP info
+    log "Network info..."
+    curl -s "https://stat.ripe.net/data/prefix-overview/data.json?resource=$target" | \
+        jq . > "$outdir/bgp.json" 2>/dev/null || true
+    
+    log "Results in: $outdir/"
+}
+
+show_help() {
+    cat << 'EOF'
+shadow-recon - Reconnaissance Automation
+
+Automated target reconnaissance with OSINT and scanning.
+
+Usage: shadow-recon <command> <target>
+
+Commands:
+  domain <domain>    Full domain reconnaissance
+  ip <ip>            IP address reconnaissance
+  person <name>      Person OSINT (ethical use)
+  infra <target>     Infrastructure/network recon
+
+Examples:
+  shadow-recon domain example.com
+  shadow-recon ip 8.8.8.8
+  shadow-recon person "John Smith"
+  shadow-recon infra 198.51.100.0/24
+
+Results saved to /shadow/recon (RAM).
+
+⚠️  Use responsibly and legally.
+EOF
+}
+
+ensure_output
+
+case "${1:-help}" in
+    domain|web)   cmd_domain "${2:-}" ;;
+    ip|host)      cmd_ip "${2:-}" ;;
+    person|user)  cmd_person "${2:-}" ;;
+    infra|net)    cmd_infra "${2:-}" ;;
+    help|-h)      show_help ;;
+    *)            error "Unknown: $1" ;;
+esac

@@ -1,0 +1,11 @@
+#!/bin/sh
+# ShadowOS TOR runit service
+# /etc/sv/tor/run
+
+exec 2>&1
+
+# Ensure data directory exists
+mkdir -p /var/lib/tor /var/log/tor
+chown -R tor:tor /var/lib/tor /var/log/tor 2>/dev/null || true
+
+exec tor -f /etc/tor/torrc

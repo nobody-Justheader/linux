@@ -1,0 +1,287 @@
+#!/bin/bash
+#
+# shadow-wifi - ShadowOS WiFi Control
+# /usr/bin/shadow-wifi
+#
+# Simple user interface for WiFi management.
+# Most operations are automatic via the daemon.
+#
+
+set -euo pipefail
+
+VERSION="1.0.0"
+DAEMON_NAME="shadow-wifi-daemon"
+CREDENTIALS_FILE="/var/lib/shadowos/wifi-credentials.db"
+LOG_FILE="/var/log/shadow-wifi.log"
+
+# =============================================================================
+# HELPER FUNCTIONS
+# =============================================================================
+
+is_daemon_running() {
+    pgrep -x "$DAEMON_NAME" &>/dev/null
+}
+
+is_connected() {
+    ping -c 1 -W 2 1.1.1.1 &>/dev/null
+}
+
+current_ssid() {
+    iwgetid -r 2>/dev/null || echo ""
+}
+
+# =============================================================================
+# COMMANDS
+# =============================================================================
+
+cmd_status() {
+    echo ""
+    echo "╔═══════════════════════════════════════════════════════════════╗"
+    echo "║                   ShadowOS WiFi Status                        ║"
+    echo "╠═══════════════════════════════════════════════════════════════╣"
+    
+    # Daemon status
+    if is_daemon_running; then
+        printf "║  Daemon:      %-49s ║\n" "✓ RUNNING (auto-connect active)"
+    else
+        printf "║  Daemon:      %-49s ║\n" "✗ STOPPED"
+    fi
+    
+    # Connection status
+    local ssid
+    ssid=$(current_ssid)
+    if [[ -n "$ssid" ]]; then
+        printf "║  Connected:   %-49s ║\n" "✓ $ssid"
+        
+        local ip
+        ip=$(ip -4 addr show wlan0 2>/dev/null | grep -oP 'inet \K[\d.]+' || echo "N/A")
+        printf "║  IP Address:  %-49s ║\n" "$ip"
+        
+        if is_connected; then
+            printf "║  Internet:    %-49s ║\n" "✓ YES"
+        else
+            printf "║  Internet:    %-49s ║\n" "✗ NO"
+        fi
+    else
+        printf "║  Connected:   %-49s ║\n" "✗ Not connected"
+    fi
+    
+    # Saved networks count
+    local saved_count=0
+    [[ -f "$CREDENTIALS_FILE" ]] && saved_count=$(wc -l < "$CREDENTIALS_FILE")
+    printf "║  Saved:       %-49s ║\n" "$saved_count networks"
+    
+    echo "╚═══════════════════════════════════════════════════════════════╝"
+    echo ""
+}
+
+cmd_on() {
+    echo "[*] Starting WiFi daemon..."
+    
+    # Try runit first
+    if [[ -d /etc/runit/sv/shadow-wifi ]]; then
+        sv start shadow-wifi
+    elif [[ -d /etc/sv/shadow-wifi ]]; then
+        sv start shadow-wifi
+    else
+        # Direct start
+        if is_daemon_running; then
+            echo "[+] Daemon already running"
+        else
+            nohup /usr/bin/shadow-wifi-daemon &>/dev/null &
+            sleep 2
+            if is_daemon_running; then
+                echo "[+] WiFi auto-connect enabled"
+            else
+                echo "[!] Failed to start daemon"
+                exit 1
+            fi
+        fi
+    fi
+}
+
+cmd_off() {
+    echo "[*] Stopping WiFi daemon..."
+    
+    # Try runit first
+    if [[ -d /etc/runit/sv/shadow-wifi ]]; then
+        sv stop shadow-wifi 2>/dev/null
+    elif [[ -d /etc/sv/shadow-wifi ]]; then
+        sv stop shadow-wifi 2>/dev/null
+    fi
+    
+    # Kill any running daemon
+    pkill -x "$DAEMON_NAME" 2>/dev/null || true
+    
+    # Disconnect WiFi
+    nmcli dev disconnect wlan0 2>/dev/null || true
+    
+    echo "[+] WiFi disabled"
+}
+
+cmd_list() {
+    echo ""
+    echo "=== Saved Networks ==="
+    echo ""
+    
+    if [[ ! -f "$CREDENTIALS_FILE" ]] || [[ ! -s "$CREDENTIALS_FILE" ]]; then
+        echo "  (no saved networks)"
+        return
+    fi
+    
+    local current
+    current=$(current_ssid)
+    
+    while IFS=: read -r ssid pass; do
+        [[ -z "$ssid" ]] && continue
+        if [[ "$ssid" == "$current" ]]; then
+            echo "  • $ssid  ← connected"
+        else
+            echo "  • $ssid"
+        fi
+    done < "$CREDENTIALS_FILE"
+    echo ""
+}
+
+cmd_forget() {
+    local ssid="$1"
+    
+    if [[ -z "$ssid" ]]; then
+        echo "Usage: shadow-wifi forget <SSID>"
+        exit 1
+    fi
+    
+    if grep -q "^${ssid}:" "$CREDENTIALS_FILE" 2>/dev/null; then
+        sed -i "/^${ssid}:/d" "$CREDENTIALS_FILE"
+        nmcli connection delete "$ssid" 2>/dev/null || true
+        echo "[+] Forgot network: $ssid"
+    else
+        echo "[!] Network not found: $ssid"
+        exit 1
+    fi
+}
+
+cmd_logs() {
+    if [[ -f "$LOG_FILE" ]]; then
+        tail -50 "$LOG_FILE"
+    else
+        echo "[!] No log file found"
+    fi
+}
+
+cmd_scan() {
+    echo "[*] Scanning for networks..."
+    echo ""
+    
+    nmcli dev wifi rescan 2>/dev/null
+    sleep 2
+    
+    echo "=== Available Networks ==="
+    echo ""
+    printf "%-32s %6s %10s\n" "SSID" "SIGNAL" "SECURITY"
+    printf "%s\n" "────────────────────────────────────────────────────"
+    
+    nmcli -t -f SSID,SIGNAL,SECURITY dev wifi list 2>/dev/null | \
+    sort -t: -k2 -rn | head -20 | \
+    while IFS=: read -r ssid signal security; do
+        [[ -z "$ssid" ]] && continue
+        printf "%-32s %5s%% %10s\n" "${ssid:0:32}" "$signal" "${security:-Open}"
+    done
+    
+    echo ""
+}
+
+cmd_connect() {
+    local ssid="$1"
+    local password="${2:-}"
+    
+    if [[ -z "$ssid" ]]; then
+        echo "Usage: shadow-wifi connect <SSID> [password]"
+        exit 1
+    fi
+    
+    if [[ -z "$password" ]]; then
+        # Check if we have saved credentials
+        password=$(grep "^${ssid}:" "$CREDENTIALS_FILE" 2>/dev/null | cut -d: -f2-)
+        
+        if [[ -z "$password" ]]; then
+            # Prompt for password
+            read -sp "Password for $ssid: " password
+            echo ""
+        fi
+    fi
+    
+    echo "[*] Connecting to: $ssid"
+    
+    if [[ -n "$password" ]]; then
+        if nmcli dev wifi connect "$ssid" password "$password" 2>/dev/null; then
+            # Save credentials
+            sed -i "/^${ssid}:/d" "$CREDENTIALS_FILE" 2>/dev/null
+            echo "${ssid}:${password}" >> "$CREDENTIALS_FILE"
+            chmod 600 "$CREDENTIALS_FILE"
+            echo "[+] Connected and saved"
+        else
+            echo "[!] Connection failed"
+            exit 1
+        fi
+    else
+        if nmcli dev wifi connect "$ssid" 2>/dev/null; then
+            echo "[+] Connected to open network"
+        else
+            echo "[!] Connection failed"
+            exit 1
+        fi
+    fi
+}
+
+show_help() {
+    cat << 'EOF'
+ShadowOS WiFi (Auto-Connect Mode)
+
+WiFi automatically scans, audits, and connects. No action needed!
+
+Usage: shadow-wifi [command] [args]
+
+Commands:
+  status              Show WiFi status (default)
+  on                  Enable WiFi auto-connect daemon
+  off                 Disable WiFi and stop daemon
+  scan                Scan for available networks
+  list                Show saved network credentials
+  connect <SSID>      Manually connect to a network
+  forget <SSID>       Remove saved network
+  logs                View recent WiFi activity
+
+The daemon runs automatically and:
+  • Scans for networks every 60 seconds
+  • Auto-connects to known networks
+  • Audits secured networks to recover passwords
+  • Saves all recovered credentials
+
+Manual password entry:
+  shadow-wifi connect "NetworkName"
+  (will prompt for password if not saved)
+
+EOF
+}
+
+# =============================================================================
+# MAIN
+# =============================================================================
+
+case "${1:-status}" in
+    status)             cmd_status ;;
+    on|start|enable)    cmd_on ;;
+    off|stop|disable)   cmd_off ;;
+    scan)               cmd_scan ;;
+    list|saved)         cmd_list ;;
+    forget|remove)      cmd_forget "${2:-}" ;;
+    connect)            cmd_connect "${2:-}" "${3:-}" ;;
+    logs|log)           cmd_logs ;;
+    help|--help|-h)     show_help ;;
+    *)
+        echo "[!] Unknown command: $1"
+        show_help
+        exit 1
+        ;;
+esac

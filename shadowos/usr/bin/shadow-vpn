@@ -1,0 +1,175 @@
+#!/bin/bash
+#
+# shadow-vpn - VPN Manager (WireGuard)
+# /usr/bin/shadow-vpn
+#
+# Quick WireGuard VPN setup and management
+#
+
+set -euo pipefail
+
+VERSION="1.0.0"
+CONFIG_DIR="/etc/wireguard"
+KEYS_DIR="/var/lib/shadowos/vpn"
+
+log() { echo "[vpn] $*"; }
+error() { echo "[vpn] ERROR: $*" >&2; exit 1; }
+
+# Generate keypair
+cmd_keygen() {
+    local name="${1:-shadowos}"
+    
+    mkdir -p "$KEYS_DIR"
+    chmod 700 "$KEYS_DIR"
+    
+    local privkey="$KEYS_DIR/${name}_private.key"
+    local pubkey="$KEYS_DIR/${name}_public.key"
+    
+    wg genkey | tee "$privkey" | wg pubkey > "$pubkey"
+    chmod 600 "$privkey"
+    
+    log "Keys generated:"
+    log "  Private: $privkey"
+    log "  Public:  $(cat "$pubkey")"
+}
+
+# Quick client config
+cmd_client() {
+    local server="$1"
+    local pubkey="$2"
+    local endpoint="$3"
+    local name="${4:-wg0}"
+    
+    mkdir -p "$KEYS_DIR"
+    
+    # Generate client keys if not exist
+    if [[ ! -f "$KEYS_DIR/client_private.key" ]]; then
+        cmd_keygen client
+    fi
+    
+    local privkey=$(cat "$KEYS_DIR/client_private.key")
+    local mypubkey=$(cat "$KEYS_DIR/client_public.key")
+    
+    cat > "$CONFIG_DIR/$name.conf" << EOF
+[Interface]
+PrivateKey = $privkey
+Address = 10.66.66.2/32
+DNS = 1.1.1.1
+
+[Peer]
+PublicKey = $pubkey
+AllowedIPs = 0.0.0.0/0, ::/0
+Endpoint = $endpoint
+PersistentKeepalive = 25
+EOF
+
+    chmod 600 "$CONFIG_DIR/$name.conf"
+    
+    log "Client config created: $CONFIG_DIR/$name.conf"
+    log "Give this public key to server: $mypubkey"
+}
+
+# Start VPN
+cmd_up() {
+    local name="${1:-wg0}"
+    
+    [[ -f "$CONFIG_DIR/$name.conf" ]] || error "Config not found: $name"
+    
+    log "Starting VPN: $name"
+    wg-quick up "$name"
+    
+    # Verify
+    sleep 2
+    local ip=$(curl -s --max-time 5 ifconfig.me || echo "unknown")
+    log "Connected. External IP: $ip"
+}
+
+# Stop VPN
+cmd_down() {
+    local name="${1:-wg0}"
+    
+    log "Stopping VPN: $name"
+    wg-quick down "$name" 2>/dev/null || true
+}
+
+# Status
+cmd_status() {
+    echo ""
+    echo "╔════════════════════════════════════════════════════════════╗"
+    echo "║                  VPN Status (WireGuard)                    ║"
+    echo "╠════════════════════════════════════════════════════════════╣"
+    
+    if ip link show wg0 &>/dev/null; then
+        printf "║  Status:     %-47s ║\n" "✓ CONNECTED"
+        local endpoint=$(wg show wg0 endpoints 2>/dev/null | awk '{print $2}' | head -1)
+        printf "║  Endpoint:   %-47s ║\n" "${endpoint:-unknown}"
+        local rx=$(wg show wg0 transfer 2>/dev/null | awk '{print $2}')
+        local tx=$(wg show wg0 transfer 2>/dev/null | awk '{print $3}')
+        printf "║  Transfer:   %-47s ║\n" "RX: $rx  TX: $tx"
+    else
+        printf "║  Status:     %-47s ║\n" "Not connected"
+    fi
+    
+    echo "╠════════════════════════════════════════════════════════════╣"
+    echo "║  Configs:                                                  ║"
+    for conf in "$CONFIG_DIR"/*.conf; do
+        [[ -f "$conf" ]] || continue
+        printf "║    %-58s ║\n" "$(basename "$conf" .conf)"
+    done
+    
+    echo "╚════════════════════════════════════════════════════════════╝"
+}
+
+# Import config file
+cmd_import() {
+    local file="$1"
+    local name="${2:-$(basename "$file" .conf)}"
+    
+    [[ -f "$file" ]] || error "File not found: $file"
+    
+    cp "$file" "$CONFIG_DIR/$name.conf"
+    chmod 600 "$CONFIG_DIR/$name.conf"
+    
+    log "Imported: $name"
+}
+
+show_help() {
+    cat << 'EOF'
+shadow-vpn - WireGuard VPN Manager
+
+Quick VPN setup and management.
+
+Usage: shadow-vpn <command> [args]
+
+Commands:
+  keygen [name]              Generate keypair
+  client <server> <pubkey> <endpoint> [name]  Create client config
+  import <file> [name]       Import config file
+  up [name]                  Connect VPN
+  down [name]                Disconnect VPN
+  status                     Show status
+
+Examples:
+  shadow-vpn keygen
+  shadow-vpn client 10.66.66.1 SERVER_PUBKEY vpn.server.com:51820
+  shadow-vpn up
+  shadow-vpn import mullvad.conf
+
+Use with TOR:
+  shadow-tor start
+  shadow-vpn up  # Chain: You -> VPN -> TOR -> Internet
+EOF
+}
+
+[[ $EUID -ne 0 ]] && [[ "${1:-}" != "status" ]] && error "Run as root"
+
+case "${1:-status}" in
+    keygen|keys)   cmd_keygen "${2:-}" ;;
+    client)        cmd_client "${2:-}" "${3:-}" "${4:-}" "${5:-}" ;;
+    import)        cmd_import "${2:-}" "${3:-}" ;;
+    up|start)      cmd_up "${2:-}" ;;
+    down|stop)     cmd_down "${2:-}" ;;
+    status)        cmd_status ;;
+    help|-h)       show_help ;;
+    *)             error "Unknown: $1" ;;
+esac

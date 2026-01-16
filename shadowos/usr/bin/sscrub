@@ -1,0 +1,363 @@
+#!/bin/bash
+#
+# sscrub - ShadowOS Metadata Scrubber
+# /usr/bin/sscrub
+#
+# Removes embedded metadata from files (EXIF, author, timestamps, etc.)
+#
+
+set -euo pipefail
+
+VERSION="1.0.0"
+
+# =============================================================================
+# CONFIGURATION
+# =============================================================================
+
+QUIET="${SHADOWOS_QUIET:-false}"
+
+# =============================================================================
+# HELPER FUNCTIONS
+# =============================================================================
+
+log() {
+    $QUIET || echo "[sscrub] $*"
+}
+
+error() {
+    echo "[sscrub] ERROR: $*" >&2
+    exit 1
+}
+
+# Check file type for scrubbing support
+get_scrub_method() {
+    local file="$1"
+    local mime
+    mime=$(file --mime-type -b "$file" 2>/dev/null || echo "unknown")
+    
+    case "$mime" in
+        image/jpeg|image/png|image/gif|image/tiff|image/webp|image/heic)
+            echo "exiftool"
+            ;;
+        application/pdf)
+            echo "pdf"
+            ;;
+        audio/mpeg|audio/mp3|audio/flac|audio/ogg|audio/wav)
+            echo "audio"
+            ;;
+        video/mp4|video/x-matroska|video/avi|video/quicktime)
+            echo "video"
+            ;;
+        application/zip|application/x-tar|application/gzip)
+            echo "archive"
+            ;;
+        application/vnd.openxmlformats-officedocument.*|application/vnd.oasis.opendocument.*)
+            echo "office"
+            ;;
+        *)
+            echo "unknown"
+            ;;
+    esac
+}
+
+# =============================================================================
+# SCRUBBING FUNCTIONS
+# =============================================================================
+
+scrub_with_mat2() {
+    local file="$1"
+    local inplace="$2"
+    
+    if command -v mat2 &>/dev/null; then
+        if $inplace; then
+            mat2 --inplace "$file" 2>/dev/null
+        else
+            mat2 "$file" 2>/dev/null
+        fi
+        return $?
+    fi
+    return 1
+}
+
+scrub_with_exiftool() {
+    local file="$1"
+    local inplace="$2"
+    
+    if command -v exiftool &>/dev/null; then
+        if $inplace; then
+            exiftool -all= -overwrite_original "$file" 2>/dev/null
+        else
+            local base="${file%.*}"
+            local ext="${file##*.}"
+            exiftool -all= -o "${base}.cleaned.${ext}" "$file" 2>/dev/null
+        fi
+        return $?
+    fi
+    return 1
+}
+
+scrub_pdf() {
+    local file="$1"
+    local inplace="$2"
+    
+    if command -v qpdf &>/dev/null; then
+        local output
+        if $inplace; then
+            output="${file}.tmp"
+            qpdf --linearize "$file" "$output" 2>/dev/null && mv "$output" "$file"
+        else
+            output="${file%.*}.cleaned.pdf"
+            qpdf --linearize "$file" "$output" 2>/dev/null
+        fi
+        return $?
+    fi
+    
+    # Fallback to mat2
+    scrub_with_mat2 "$file" "$inplace"
+}
+
+scrub_audio() {
+    local file="$1"
+    local inplace="$2"
+    
+    # Try mat2 first
+    if scrub_with_mat2 "$file" "$inplace"; then
+        return 0
+    fi
+    
+    # Fallback to ffmpeg (strips metadata)
+    if command -v ffmpeg &>/dev/null; then
+        local output="${file}.tmp"
+        ffmpeg -i "$file" -map_metadata -1 -c copy "$output" 2>/dev/null && {
+            if $inplace; then
+                mv "$output" "$file"
+            else
+                mv "$output" "${file%.*}.cleaned.${file##*.}"
+            fi
+            return 0
+        }
+    fi
+    
+    return 1
+}
+
+scrub_video() {
+    local file="$1"
+    local inplace="$2"
+    
+    # Try mat2 first
+    if scrub_with_mat2 "$file" "$inplace"; then
+        return 0
+    fi
+    
+    # Fallback to ffmpeg
+    if command -v ffmpeg &>/dev/null; then
+        local output="${file}.tmp"
+        ffmpeg -i "$file" -map_metadata -1 -c copy "$output" 2>/dev/null && {
+            if $inplace; then
+                mv "$output" "$file"
+            else
+                mv "$output" "${file%.*}.cleaned.${file##*.}"
+            fi
+            return 0
+        }
+    fi
+    
+    return 1
+}
+
+scrub_file() {
+    local file="$1"
+    local inplace="$2"
+    
+    if [[ ! -f "$file" ]]; then
+        error "File not found: $file"
+    fi
+    
+    local method
+    method=$(get_scrub_method "$file")
+    
+    log "Scrubbing: $file (method: $method)"
+    
+    case "$method" in
+        exiftool)
+            # Try mat2 first, fallback to exiftool
+            scrub_with_mat2 "$file" "$inplace" || scrub_with_exiftool "$file" "$inplace" || {
+                log "Warning: Could not scrub $file"
+                return 1
+            }
+            ;;
+        pdf)
+            scrub_pdf "$file" "$inplace" || {
+                log "Warning: Could not scrub PDF $file"
+                return 1
+            }
+            ;;
+        audio)
+            scrub_audio "$file" "$inplace" || {
+                log "Warning: Could not scrub audio $file"
+                return 1
+            }
+            ;;
+        video)
+            scrub_video "$file" "$inplace" || {
+                log "Warning: Could not scrub video $file"
+                return 1
+            }
+            ;;
+        office|archive)
+            scrub_with_mat2 "$file" "$inplace" || {
+                log "Warning: Could not scrub $file (mat2 required)"
+                return 1
+            }
+            ;;
+        unknown)
+            log "Unknown file type, skipping: $file"
+            return 1
+            ;;
+    esac
+    
+    return 0
+}
+
+# =============================================================================
+# METADATA INSPECTION
+# =============================================================================
+
+show_metadata() {
+    local file="$1"
+    
+    echo ""
+    echo "=== Metadata for: $file ==="
+    echo ""
+    
+    if command -v exiftool &>/dev/null; then
+        exiftool "$file" 2>/dev/null
+    elif command -v mat2 &>/dev/null; then
+        mat2 --show "$file" 2>/dev/null
+    else
+        echo "No metadata tool available (install exiftool or mat2)"
+    fi
+    echo ""
+}
+
+# =============================================================================
+# ARGUMENT PARSING
+# =============================================================================
+
+INPLACE=false
+RECURSIVE=false
+VERBOSE=false
+SHOW_META=false
+FILES=()
+
+show_help() {
+    cat << 'EOF'
+sscrub - ShadowOS Metadata Scrubber
+
+Remove identifying metadata from files (EXIF, author, timestamps, etc.)
+
+Usage: sscrub [OPTIONS] FILE...
+
+Options:
+  -i, --inplace     Modify files in place (default: create .cleaned copy)
+  -r, --recursive   Process directories recursively
+  -s, --show        Show metadata instead of scrubbing
+  -v, --verbose     Verbose output
+  --help            Show this help
+
+Supported formats:
+  Images:    JPEG, PNG, GIF, TIFF, WebP, HEIC
+  Documents: PDF, DOCX, ODT, XLSX, PPTX
+  Audio:     MP3, FLAC, OGG, WAV
+  Video:     MP4, MKV, AVI, MOV
+  Archives:  ZIP, TAR, GZIP
+
+Examples:
+  sscrub photo.jpg              # Creates photo.cleaned.jpg
+  sscrub -i photo.jpg           # Modifies photo.jpg in place
+  sscrub -r ./documents/        # Scrub all files in directory
+  sscrub -s photo.jpg           # Show metadata without removing
+
+Requires: mat2, exiftool, or ffmpeg (at least one)
+
+EOF
+    exit 0
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -i|--inplace)
+            INPLACE=true
+            shift
+            ;;
+        -r|--recursive)
+            RECURSIVE=true
+            shift
+            ;;
+        -s|--show)
+            SHOW_META=true
+            shift
+            ;;
+        -v|--verbose)
+            VERBOSE=true
+            QUIET=false
+            shift
+            ;;
+        --help|-h)
+            show_help
+            ;;
+        --)
+            shift
+            break
+            ;;
+        -*)
+            error "Unknown option: $1"
+            ;;
+        *)
+            FILES+=("$1")
+            shift
+            ;;
+    esac
+done
+
+FILES+=("$@")
+
+if [[ ${#FILES[@]} -eq 0 ]]; then
+    error "No files specified. Usage: sscrub [OPTIONS] FILE..."
+fi
+
+# =============================================================================
+# MAIN
+# =============================================================================
+
+success=0
+failed=0
+
+for target in "${FILES[@]}"; do
+    if [[ -d "$target" ]]; then
+        if $RECURSIVE; then
+            while IFS= read -r -d '' file; do
+                if $SHOW_META; then
+                    show_metadata "$file"
+                else
+                    scrub_file "$file" $INPLACE && ((success++)) || ((failed++))
+                fi
+            done < <(find "$target" -type f -print0)
+        else
+            log "Skipping directory: $target (use -r for recursive)"
+        fi
+    elif [[ -f "$target" ]]; then
+        if $SHOW_META; then
+            show_metadata "$target"
+        else
+            scrub_file "$target" $INPLACE && ((success++)) || ((failed++))
+        fi
+    else
+        error "Not found: $target"
+    fi
+done
+
+if ! $SHOW_META; then
+    log "Scrubbing complete: $success succeeded, $failed failed"
+fi

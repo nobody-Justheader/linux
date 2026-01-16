@@ -1,0 +1,11 @@
+#!/bin/sh
+# ShadowOS RAM Workspace runit service
+# /etc/sv/shadow-workspace/run
+
+exec 2>&1
+
+# Create RAM workspace on boot
+/usr/bin/shadow-workspace create 50%
+
+# Keep service running
+exec sleep infinity

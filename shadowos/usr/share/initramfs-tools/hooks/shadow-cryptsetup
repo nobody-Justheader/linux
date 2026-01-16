@@ -1,0 +1,59 @@
+#!/bin/bash
+#
+# shadow-initramfs-hook - Hook for initramfs to support hidden volume boot
+# /usr/share/initramfs-tools/hooks/shadow-cryptsetup
+#
+# This hook adds support for opening hidden LUKS volumes and VeraCrypt containers
+#
+
+PREREQ=""
+
+prereqs() {
+    echo "$PREREQ"
+}
+
+case "$1" in
+    prereqs)
+        prereqs
+        exit 0
+        ;;
+esac
+
+. /usr/share/initramfs-tools/hook-functions
+
+# Copy cryptsetup
+copy_exec /sbin/cryptsetup /sbin
+
+# Copy LUKS2 support
+manual_add_modules dm_crypt
+manual_add_modules dm_mod
+manual_add_modules xts
+manual_add_modules aes
+manual_add_modules aes_generic
+manual_add_modules sha256
+manual_add_modules sha512
+manual_add_modules algif_skcipher
+manual_add_modules af_alg
+manual_add_modules serpent_generic
+manual_add_modules twofish_generic
+manual_add_modules argon2
+
+# Copy veracrypt if available
+if [ -x /usr/bin/veracrypt ]; then
+    copy_exec /usr/bin/veracrypt /usr/bin
+fi
+
+# Copy our shadow decrypt script
+if [ -f /usr/share/shadowos/shadow-decrypt ]; then
+    mkdir -p "${DESTDIR}/usr/share/shadowos"
+    cp /usr/share/shadowos/shadow-decrypt "${DESTDIR}/usr/share/shadowos/"
+    chmod +x "${DESTDIR}/usr/share/shadowos/shadow-decrypt"
+fi
+
+# Copy hidden header location config
+if [ -f /etc/shadowos/hidden-header.conf ]; then
+    mkdir -p "${DESTDIR}/etc/shadowos"
+    cp /etc/shadowos/hidden-header.conf "${DESTDIR}/etc/shadowos/"
+fi
+
+exit 0

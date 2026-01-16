@@ -1,0 +1,178 @@
+/* ShadowOS Waybar Style - Tokyo Night Theme */
+
+* {
+    font-family: "JetBrains Mono", "Symbols Nerd Font", monospace;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+window#waybar {
+    background: rgba(26, 27, 38, 0.9);
+    border-radius: 12px;
+    border: 2px solid rgba(122, 162, 247, 0.3);
+    color: #c0caf5;
+}
+
+/* Workspaces */
+#workspaces button {
+    padding: 0 8px;
+    margin: 4px 2px;
+    color: #565f89;
+    background: transparent;
+    border-radius: 8px;
+    transition: all 0.2s ease;
+}
+
+#workspaces button:hover {
+    background: rgba(122, 162, 247, 0.2);
+    color: #7aa2f7;
+}
+
+#workspaces button.focused {
+    background: rgba(122, 162, 247, 0.3);
+    color: #7aa2f7;
+    border-bottom: 2px solid #7aa2f7;
+}
+
+#workspaces button.urgent {
+    background: rgba(247, 118, 142, 0.3);
+    color: #f7768e;
+}
+
+/* Mode (resize, etc) */
+#mode {
+    background: rgba(187, 154, 247, 0.2);
+    color: #bb9af7;
+    padding: 0 12px;
+    border-radius: 8px;
+    margin: 4px;
+}
+
+/* Window title */
+#window {
+    color: #565f89;
+    padding: 0 12px;
+}
+
+/* Clock */
+#clock {
+    color: #c0caf5;
+    font-weight: 600;
+    padding: 0 12px;
+}
+
+/* Custom modules (stealth, tor) */
+#custom-stealth,
+#custom-tor {
+    padding: 0 10px;
+    margin: 4px 2px;
+    border-radius: 8px;
+}
+
+#custom-stealth.active {
+    background: rgba(158, 206, 106, 0.2);
+    color: #9ece6a;
+}
+
+#custom-stealth.inactive {
+    color: #565f89;
+}
+
+#custom-tor.active {
+    background: rgba(187, 154, 247, 0.2);
+    color: #bb9af7;
+}
+
+#custom-tor.inactive {
+    color: #565f89;
+}
+
+/* Network */
+#network {
+    padding: 0 12px;
+    margin: 4px 2px;
+    border-radius: 8px;
+}
+
+#network.wifi {
+    background: rgba(122, 162, 247, 0.15);
+    color: #7aa2f7;
+}
+
+#network.ethernet {
+    background: rgba(158, 206, 106, 0.15);
+    color: #9ece6a;
+}
+
+#network.disconnected {
+    background: rgba(247, 118, 142, 0.15);
+    color: #f7768e;
+}
+
+/* Audio */
+#pulseaudio {
+    padding: 0 12px;
+    margin: 4px 2px;
+    border-radius: 8px;
+    background: rgba(224, 175, 104, 0.15);
+    color: #e0af68;
+}
+
+#pulseaudio.muted {
+    background: rgba(86, 95, 137, 0.15);
+    color: #565f89;
+}
+
+/* Battery */
+#battery {
+    padding: 0 12px;
+    margin: 4px 2px;
+    border-radius: 8px;
+    background: rgba(158, 206, 106, 0.15);
+    color: #9ece6a;
+}
+
+#battery.charging {
+    background: rgba(158, 206, 106, 0.2);
+    color: #9ece6a;
+}
+
+#battery.warning:not(.charging) {
+    background: rgba(224, 175, 104, 0.2);
+    color: #e0af68;
+}
+
+#battery.critical:not(.charging) {
+    background: rgba(247, 118, 142, 0.3);
+    color: #f7768e;
+    animation: blink 1s linear infinite;
+}
+
+@keyframes blink {
+    50% { opacity: 0.5; }
+}
+
+/* Power button */
+#custom-power {
+    padding: 0 12px;
+    margin: 4px 6px 4px 2px;
+    color: #f7768e;
+    border-radius: 8px;
+    transition: all 0.2s ease;
+}
+
+#custom-power:hover {
+    background: rgba(247, 118, 142, 0.2);
+}
+
+/* Tooltip styles */
+tooltip {
+    background: rgba(26, 27, 38, 0.95);
+    border: 1px solid rgba(122, 162, 247, 0.3);
+    border-radius: 8px;
+}
+
+tooltip label {
+    color: #c0caf5;
+    padding: 8px;
+}

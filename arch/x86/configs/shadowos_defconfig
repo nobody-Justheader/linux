@@ -1,0 +1,117 @@
+# ShadowOS defconfig
+# Use: make ARCH=x86_64 shadowos_defconfig
+#
+# Or merge with existing config:
+#   scripts/kconfig/merge_config.sh .config kernel/configs/privacy.config arch/x86/configs/shadowos_defconfig
+#
+
+# =============================================================================
+# SHADOWOS OPTIONS
+# =============================================================================
+
+CONFIG_SHADOWOS=y
+CONFIG_SHADOWOS_HIDDEN_BOOT=y
+CONFIG_SHADOWOS_ANTI_FORENSIC=y
+CONFIG_SHADOWOS_STEALTH_NETWORK=y
+CONFIG_SHADOWOS_HARDENING=y
+CONFIG_SHADOWOS_DESKTOP=y
+CONFIG_SHADOWOS_KALI_TOOLS=y
+CONFIG_SHADOWOS_TOOLS_MINIMAL=y
+# CONFIG_SHADOWOS_TOOLS_STANDARD is not set
+# CONFIG_SHADOWOS_TOOLS_FULL is not set
+# CONFIG_SHADOWOS_RAM_ONLY is not set
+
+# =============================================================================
+# PRIVACY CONFIG (from kernel/configs/privacy.config)
+# =============================================================================
+
+# Security
+CONFIG_SECURITY=y
+CONFIG_SECURITYFS=y
+CONFIG_SECURITY_NETWORK=y
+CONFIG_LSM="landlock,lockdown,yama,apparmor"
+CONFIG_DEFAULT_SECURITY_APPARMOR=y
+CONFIG_SECURITY_APPARMOR=y
+CONFIG_SECURITY_YAMA=y
+CONFIG_SECURITY_LANDLOCK=y
+
+# Memory hardening
+CONFIG_STACKPROTECTOR=y
+CONFIG_STACKPROTECTOR_STRONG=y
+CONFIG_HARDENED_USERCOPY=y
+CONFIG_FORTIFY_SOURCE=y
+CONFIG_INIT_STACK_ALL_ZERO=y
+CONFIG_INIT_ON_ALLOC_DEFAULT_ON=y
+CONFIG_RANDOMIZE_BASE=y
+CONFIG_RANDOMIZE_MEMORY=y
+
+# Disable debug
+# CONFIG_DEBUG_KERNEL is not set
+# CONFIG_KPROBES is not set
+# CONFIG_FTRACE is not set
+
+# Restrict info leaks
+CONFIG_SECURITY_DMESG_RESTRICT=y
+
+# =============================================================================
+# CRYPTO
+# =============================================================================
+
+CONFIG_CRYPTO=y
+CONFIG_CRYPTO_AES=y
+CONFIG_CRYPTO_XTS=y
+CONFIG_CRYPTO_SHA512=y
+CONFIG_CRYPTO_CHACHA20POLY1305=y
+CONFIG_CRYPTO_USER_API=y
+CONFIG_CRYPTO_USER_API_HASH=y
+CONFIG_CRYPTO_USER_API_SKCIPHER=y
+
+# =============================================================================
+# BLOCK ENCRYPTION
+# =============================================================================
+
+CONFIG_BLK_DEV_DM=y
+CONFIG_DM_CRYPT=y
+CONFIG_DM_VERITY=y
+
+# =============================================================================
+# WIRELESS
+# =============================================================================
+
+CONFIG_WIRELESS=y
+CONFIG_CFG80211=m
+CONFIG_MAC80211=m
+CONFIG_RFKILL=m
+
+# =============================================================================
+# NETWORKING
+# =============================================================================
+
+CONFIG_NET=y
+CONFIG_INET=y
+CONFIG_NETFILTER=y
+CONFIG_NF_TABLES=m
+CONFIG_WIREGUARD=m
+CONFIG_TLS=y
+
+# =============================================================================
+# FILESYSTEMS
+# =============================================================================
+
+CONFIG_EXT4_FS=y
+CONFIG_BTRFS_FS=m
+CONFIG_SQUASHFS=y
+CONFIG_SQUASHFS_XZ=y
+CONFIG_OVERLAY_FS=y
+CONFIG_TMPFS=y
+CONFIG_FUSE_FS=m
+CONFIG_VFAT_FS=m
+
+# =============================================================================
+# USB
+# =============================================================================
+
+CONFIG_USB=y
+CONFIG_USB_XHCI_HCD=y
+CONFIG_USB_EHCI_HCD=y
+CONFIG_USB_STORAGE=m

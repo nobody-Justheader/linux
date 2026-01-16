@@ -1,0 +1,257 @@
+#!/bin/bash
+#
+# shadow-wordlist - ShadowOS Wordlist Manager
+# /usr/bin/shadow-wordlist
+#
+# Manage wordlists for password cracking - download on-demand
+#
+
+set -euo pipefail
+
+VERSION="1.0.0"
+WORDLIST_DIR="${WORDLIST_DIR:-/usr/share/wordlists}"
+CACHE_DIR="/var/cache/shadowos/wordlists"
+
+# =============================================================================
+# WORDLIST SOURCES
+# =============================================================================
+
+declare -A WORDLISTS=(
+    # Small/Fast (included by default)
+    ["shadow-common"]="local:50MB:Common passwords optimized for speed"
+    
+    # SecLists
+    ["rockyou"]="https://github.com/brannondorsey/naive-hashcat/releases/download/data/rockyou.txt:140MB:Classic leaked passwords"
+    ["common-credentials"]="https://raw.githubusercontent.com/danielmiessler/SecLists/master/Passwords/Common-Credentials/10-million-password-list-top-1000000.txt:8MB:Top 1M passwords"
+    
+    # WiFi specific
+    ["wifi-common"]="https://raw.githubusercontent.com/kennyn510/wpa2-wordlists/master/wifi-common.txt:5MB:Common WiFi passwords"
+    
+    # Usernames
+    ["usernames"]="https://raw.githubusercontent.com/danielmiessler/SecLists/master/Usernames/top-usernames-shortlist.txt:1KB:Common usernames"
+    
+    # Web fuzzing
+    ["dirb-common"]="https://raw.githubusercontent.com/v0re/dirb/master/wordlists/common.txt:40KB:Directory bruteforce"
+    ["raft-large"]="https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/raft-large-directories.txt:500KB:Large directory list"
+)
+
+# =============================================================================
+# FUNCTIONS
+# =============================================================================
+
+log() { echo "[wordlist] $*"; }
+error() { echo "[wordlist] ERROR: $*" >&2; exit 1; }
+
+ensure_dirs() {
+    mkdir -p "$WORDLIST_DIR" "$CACHE_DIR"
+}
+
+# Create default shadow-common wordlist
+create_shadow_common() {
+    local outfile="$WORDLIST_DIR/shadow-common.txt"
+    
+    if [[ -f "$outfile" ]]; then
+        return 0
+    fi
+    
+    log "Creating shadow-common wordlist..."
+    
+    # Generate optimized wordlist with common patterns
+    cat > "$outfile" << 'WORDLIST'
+password
+123456
+12345678
+qwerty
+abc123
+monkey
+1234567
+letmein
+trustno1
+dragon
+baseball
+iloveyou
+master
+sunshine
+ashley
+bailey
+shadow
+123123
+654321
+superman
+qazwsx
+michael
+football
+password1
+password123
+welcome
+welcome1
+admin
+admin123
+root
+toor
+guest
+test
+test123
+changeme
+passw0rd
+p@ssw0rd
+P@ssword1
+Summer2024
+Winter2024
+Spring2024
+Fall2024
+January2024
+Company123
+Qwerty123
+Password!
+Secret123
+WORDLIST
+
+    # Add numeric patterns
+    for i in {0..9999}; do
+        printf "%04d\n" $i
+    done >> "$outfile"
+    
+    # Add year patterns
+    for year in {2020..2030}; do
+        echo "$year"
+        echo "password$year"
+        echo "Pass$year"
+        echo "Welcome$year"
+    done >> "$outfile"
+    
+    # Remove duplicates and sort
+    sort -u "$outfile" -o "$outfile"
+    
+    log "Created: $outfile ($(wc -l < "$outfile") entries)"
+}
+
+download_wordlist() {
+    local name="$1"
+    local info="${WORDLISTS[$name]:-}"
+    
+    [[ -z "$info" ]] && error "Unknown wordlist: $name"
+    
+    local url=$(echo "$info" | cut -d: -f1-2)
+    local size=$(echo "$info" | cut -d: -f3)
+    local desc=$(echo "$info" | cut -d: -f4-)
+    
+    local outfile="$WORDLIST_DIR/${name}.txt"
+    
+    if [[ -f "$outfile" ]]; then
+        log "$name already exists: $outfile"
+        return 0
+    fi
+    
+    if [[ "$url" == "local:"* ]]; then
+        create_shadow_common
+        return 0
+    fi
+    
+    log "Downloading $name (~$size)..."
+    log "  $desc"
+    
+    curl -L --progress-bar "$url" -o "$outfile" || {
+        rm -f "$outfile"
+        error "Download failed"
+    }
+    
+    # Handle gzip
+    if file "$outfile" | grep -q gzip; then
+        gunzip "$outfile"
+        mv "${outfile%.gz}" "$outfile" 2>/dev/null || true
+    fi
+    
+    log "Downloaded: $outfile ($(wc -l < "$outfile") entries)"
+}
+
+list_wordlists() {
+    echo ""
+    echo "╔═══════════════════════════════════════════════════════════════════════╗"
+    echo "║                    ShadowOS Wordlist Manager                          ║"
+    echo "╠═══════════════════════════════════════════════════════════════════════╣"
+    echo ""
+    
+    printf "  %-20s %-10s %-8s %s\n" "NAME" "SIZE" "STATUS" "DESCRIPTION"
+    printf "  %s\n" "────────────────────────────────────────────────────────────────────"
+    
+    for name in "${!WORDLISTS[@]}"; do
+        local info="${WORDLISTS[$name]}"
+        local size=$(echo "$info" | cut -d: -f3)
+        local desc=$(echo "$info" | cut -d: -f4-)
+        local status="[ ]"
+        
+        [[ -f "$WORDLIST_DIR/${name}.txt" ]] && status="[✓]"
+        
+        printf "  %-20s %-10s %-8s %s\n" "$name" "$size" "$status" "${desc:0:35}"
+    done
+    
+    echo ""
+    echo "  Directory: $WORDLIST_DIR"
+    echo ""
+}
+
+cmd_get() {
+    ensure_dirs
+    
+    for name in "$@"; do
+        if [[ "$name" == "all" ]]; then
+            for wl in "${!WORDLISTS[@]}"; do
+                download_wordlist "$wl"
+            done
+        else
+            download_wordlist "$name"
+        fi
+    done
+}
+
+cmd_path() {
+    local name="$1"
+    local path="$WORDLIST_DIR/${name}.txt"
+    
+    if [[ -f "$path" ]]; then
+        echo "$path"
+    else
+        error "Wordlist not found: $name (run: shadow-wordlist get $name)"
+    fi
+}
+
+show_help() {
+    cat << 'EOF'
+shadow-wordlist - ShadowOS Wordlist Manager
+
+Download and manage wordlists for password cracking.
+
+Usage: shadow-wordlist <command> [args]
+
+Commands:
+  list              Show available wordlists
+  get <name...>     Download wordlist(s)
+  get all           Download all wordlists
+  path <name>       Print path to wordlist
+
+Examples:
+  shadow-wordlist list
+  shadow-wordlist get rockyou
+  shadow-wordlist get rockyou wifi-common
+  shadow-wordlist path rockyou
+
+Use with hashcat:
+  hashcat -m 2500 capture.hccapx $(shadow-wordlist path rockyou)
+
+EOF
+}
+
+# =============================================================================
+# MAIN
+# =============================================================================
+
+ensure_dirs
+
+case "${1:-list}" in
+    list|ls)        list_wordlists ;;
+    get|download)   shift; cmd_get "$@" ;;
+    path|find)      cmd_path "${2:-}" ;;
+    help|--help|-h) show_help ;;
+    *)              error "Unknown command: $1" ;;
+esac

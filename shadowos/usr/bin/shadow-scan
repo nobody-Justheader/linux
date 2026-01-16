@@ -1,0 +1,173 @@
+#!/bin/bash
+#
+# shadow-scan - Network Scanner Wrapper
+# /usr/bin/shadow-scan
+#
+# Quick network reconnaissance with stealth options
+#
+
+set -euo pipefail
+
+VERSION="1.0.0"
+OUTPUT_DIR="/shadow/scans"
+
+log() { echo "[scan] $*"; }
+error() { echo "[scan] ERROR: $*" >&2; exit 1; }
+
+ensure_output() {
+    mkdir -p "$OUTPUT_DIR"
+}
+
+# Quick host discovery
+cmd_discover() {
+    local target="${1:-192.168.1.0/24}"
+    
+    ensure_output
+    log "Discovering hosts on $target..."
+    
+    if command -v nmap &>/dev/null; then
+        nmap -sn -T4 "$target" | grep -E "^Nmap scan|Host is up"
+    elif command -v arp-scan &>/dev/null; then
+        arp-scan "$target"
+    else
+        # Fallback to ping sweep
+        local base=$(echo "$target" | cut -d/ -f1 | rev | cut -d. -f2- | rev)
+        for i in {1..254}; do
+            ping -c1 -W1 "$base.$i" &>/dev/null && echo "$base.$i is up" &
+        done
+        wait
+    fi
+}
+
+# Fast port scan
+cmd_fast() {
+    local target="$1"
+    
+    ensure_output
+    log "Fast scan: $target (top 1000 ports)..."
+    
+    if command -v masscan &>/dev/null; then
+        masscan -p1-1000 --rate=1000 "$target"
+    elif command -v nmap &>/dev/null; then
+        nmap -T4 -F "$target"
+    else
+        error "No scanner found"
+    fi
+}
+
+# Full port scan
+cmd_full() {
+    local target="$1"
+    local outfile="$OUTPUT_DIR/full_$(echo "$target" | tr '/' '_')_$(date +%H%M%S)"
+    
+    ensure_output
+    log "Full scan: $target (all ports)..."
+    log "Output: $outfile.xml"
+    
+    nmap -p- -T4 -A -oA "$outfile" "$target"
+}
+
+# Stealth scan
+cmd_stealth() {
+    local target="$1"
+    
+    ensure_output
+    log "Stealth scan: $target..."
+    
+    nmap -sS -T2 -f --data-length 24 \
+        -D RND:5 --spoof-mac 0 \
+        "$target"
+}
+
+# Vulnerability scan
+cmd_vuln() {
+    local target="$1"
+    local outfile="$OUTPUT_DIR/vuln_$(echo "$target" | tr '/' '_')_$(date +%H%M%S)"
+    
+    ensure_output
+    log "Vulnerability scan: $target..."
+    
+    nmap --script=vuln -T4 -oA "$outfile" "$target"
+}
+
+# Service detection
+cmd_services() {
+    local target="$1"
+    
+    ensure_output
+    log "Service detection: $target..."
+    
+    nmap -sV -sC -T4 "$target"
+}
+
+# Web scan
+cmd_web() {
+    local target="$1"
+    local port="${2:-80}"
+    
+    ensure_output
+    log "Web scan: $target:$port..."
+    
+    if command -v nikto &>/dev/null; then
+        nikto -h "$target" -p "$port"
+    elif command -v whatweb &>/dev/null; then
+        whatweb -a 3 "$target:$port"
+    else
+        nmap --script=http-enum,http-headers,http-methods "$target" -p "$port"
+    fi
+}
+
+# WiFi scan
+cmd_wifi() {
+    local interface="${1:-wlan0}"
+    
+    log "WiFi scan on $interface..."
+    
+    if command -v iw &>/dev/null; then
+        iw dev "$interface" scan 2>/dev/null | grep -E "^BSS|SSID:|signal:|capability:"
+    elif command -v iwlist &>/dev/null; then
+        iwlist "$interface" scan 2>/dev/null | grep -E "Cell|ESSID|Signal|Encryption"
+    fi
+}
+
+show_help() {
+    cat << 'EOF'
+shadow-scan - Network Scanner
+
+Quick network reconnaissance with stealth options.
+
+Usage: shadow-scan <command> <target> [options]
+
+Commands:
+  discover <subnet>      Host discovery (ping sweep)
+  fast <target>          Fast port scan (top 1000)
+  full <target>          Full port scan (all 65535)
+  stealth <target>       Stealth scan (fragmented, decoys)
+  vuln <target>          Vulnerability scan
+  services <target>      Service/version detection
+  web <target> [port]    Web server scan
+  wifi [interface]       WiFi network scan
+
+Examples:
+  shadow-scan discover 192.168.1.0/24
+  shadow-scan fast 192.168.1.1
+  shadow-scan stealth 10.0.0.1
+  shadow-scan web example.com 443
+  shadow-scan wifi wlan0
+
+Scans saved to /shadow/scans (RAM).
+EOF
+}
+
+case "${1:-help}" in
+    discover|host|hosts)  cmd_discover "${2:-}" ;;
+    fast|quick)          cmd_fast "${2:-}" ;;
+    full|all)            cmd_full "${2:-}" ;;
+    stealth|quiet)       cmd_stealth "${2:-}" ;;
+    vuln|vulnerability)  cmd_vuln "${2:-}" ;;
+    services|version)    cmd_services "${2:-}" ;;
+    web|http)            cmd_web "${2:-}" "${3:-80}" ;;
+    wifi|wireless)       cmd_wifi "${2:-}" ;;
+    help|-h|--help)      show_help ;;
+    *)                   error "Unknown command: $1" ;;
+esac

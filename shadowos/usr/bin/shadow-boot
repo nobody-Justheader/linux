@@ -1,0 +1,168 @@
+#!/bin/bash
+#
+# shadow-boot - ShadowOS Boot Manager CLI
+# /usr/bin/shadow-boot
+#
+# Manage hidden boot partition from running system
+#
+
+set -euo pipefail
+
+VERSION="1.0.0"
+
+HEADER_LOCATIONS=(
+    "/.shadow/header.bin"
+    "/boot/.shadow/header.bin"
+    "/mnt/usb/.shadow/header.bin"
+)
+
+log()   { echo "[shadow-boot] $*"; }
+error() { echo "[shadow-boot] ERROR: $*" >&2; exit 1; }
+
+# Find header file
+find_header() {
+    for loc in "${HEADER_LOCATIONS[@]}"; do
+        [[ -f "$loc" ]] && { echo "$loc"; return 0; }
+    done
+    
+    # Check mounted USB drives
+    for mnt in /mnt/* /media/*; do
+        [[ -f "$mnt/.shadow/header.bin" ]] && { echo "$mnt/.shadow/header.bin"; return 0; }
+    done
+    
+    return 1
+}
+
+# Find encrypted partition
+find_crypt_device() {
+    for dev in /dev/sd?3 /dev/nvme?n1p3 /dev/mmcblk?p3; do
+        [[ -b "$dev" ]] && { echo "$dev"; return 0; }
+    done
+    return 1
+}
+
+cmd_status() {
+    echo ""
+    echo "╔════════════════════════════════════════════════════════════╗"
+    echo "║               ShadowOS Boot Status                         ║"
+    echo "╠════════════════════════════════════════════════════════════╣"
+    
+    # Check if we're booted from hidden volume
+    if [[ -e /dev/mapper/shadow_root ]] && mount | grep -q shadow_root; then
+        printf "║  Boot Mode:    %-45s ║\n" "✓ HIDDEN VOLUME"
+    else
+        printf "║  Boot Mode:    %-45s ║\n" "Normal"
+    fi
+    
+    # Header status
+    local header
+    if header=$(find_header); then
+        printf "║  Header:       %-45s ║\n" "Found at ${header:0:40}"
+    else
+        printf "║  Header:       %-45s ║\n" "Not found"
+    fi
+    
+    # Encrypted device
+    local crypt_dev
+    if crypt_dev=$(find_crypt_device 2>/dev/null); then
+        printf "║  Encrypted:    %-45s ║\n" "$crypt_dev"
+    else
+        printf "║  Encrypted:    %-45s ║\n" "Not detected"
+    fi
+    
+    echo "╚════════════════════════════════════════════════════════════╝"
+    echo ""
+}
+
+cmd_open() {
+    local mount_point="${1:-/mnt/shadow}"
+    
+    log "Opening hidden volume..."
+    
+    local header
+    header=$(find_header) || error "Header file not found"
+    
+    local crypt_dev
+    crypt_dev=$(find_crypt_device) || error "Encrypted partition not found"
+    
+    log "Using header: $header"
+    log "Device: $crypt_dev"
+    
+    cryptsetup open --header "$header" "$crypt_dev" shadow_root
+    
+    mkdir -p "$mount_point"
+    mount /dev/mapper/shadow_root "$mount_point"
+    
+    log "Hidden volume mounted at: $mount_point"
+}
+
+cmd_close() {
+    local mount_point="${1:-/mnt/shadow}"
+    
+    log "Closing hidden volume..."
+    
+    umount "$mount_point" 2>/dev/null || true
+    cryptsetup close shadow_root
+    
+    log "Hidden volume closed"
+}
+
+cmd_backup_header() {
+    local dest="${1:-./shadow_header_backup.bin}"
+    
+    local header
+    header=$(find_header) || error "Header file not found"
+    
+    cp "$header" "$dest"
+    chmod 600 "$dest"
+    
+    log "Header backed up to: $dest"
+    log "⚠️  Store this backup securely - needed to access hidden volume!"
+}
+
+cmd_change_password() {
+    log "Changing hidden volume password..."
+    
+    local header
+    header=$(find_header) || error "Header file not found"
+    
+    local crypt_dev
+    crypt_dev=$(find_crypt_device) || error "Encrypted partition not found"
+    
+    cryptsetup luksChangeKey --header "$header" "$crypt_dev"
+    
+    log "Password changed successfully"
+}
+
+show_help() {
+    cat << 'EOF'
+shadow-boot - ShadowOS Boot Manager
+
+Manage the hidden encrypted boot partition.
+
+Usage: shadow-boot <command> [args]
+
+Commands:
+  status              Show boot status
+  open [mountpoint]   Open and mount hidden volume
+  close [mountpoint]  Close hidden volume
+  backup <file>       Backup header file
+  change-password     Change hidden volume password
+
+Examples:
+  shadow-boot status
+  shadow-boot open /mnt/hidden
+  shadow-boot backup ~/header_backup.bin
+
+EOF
+}
+
+case "${1:-status}" in
+    status)                 cmd_status ;;
+    open)                   cmd_open "${2:-}" ;;
+    close)                  cmd_close "${2:-}" ;;
+    backup|backup-header)   cmd_backup_header "${2:-}" ;;
+    change-password|passwd) cmd_change_password ;;
+    help|--help|-h)         show_help ;;
+    *)                      error "Unknown command: $1" ;;
+esac
