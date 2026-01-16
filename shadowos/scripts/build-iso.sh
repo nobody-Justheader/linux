@@ -6,6 +6,28 @@
 # MUST BE RUN INSIDE DOCKER CONTAINER via build-in-docker.sh
 #
 
+# Arguments
+STAGE="${1:-all}"
+
+# If running from Makefile, we might get specific flags
+case "$STAGE" in
+    --stage-rootfs)
+        STAGE="rootfs"
+        ;;
+    --stage-packages)
+        STAGE="packages"
+        ;;
+    --stage-config)
+        STAGE="config"
+        ;;
+    --stage-iso)
+        STAGE="iso"
+        ;;
+    *)
+        STAGE="all"
+        ;;
+esac
+
 # Check if running inside a container (Docker safety check)
 if [ ! -f /.dockerenv ] && [ -z "${SHADOWOS_ALLOW_HOST_BUILD:-}" ]; then
     echo "[ERROR] This script must be run inside a Docker container."
@@ -40,10 +62,10 @@ cleanup() {
         local rootfs="$BUILD_DIR/rootfs"
         # Unmount in reverse order: dev/pts -> dev -> sys -> proc
         # We check mountpoint -q to avoid errors on already unmounted dirs
-        mountpoint -q "$rootfs/dev/pts" && sudo umount "$rootfs/dev/pts"
-        mountpoint -q "$rootfs/dev"     && sudo umount "$rootfs/dev"
-        mountpoint -q "$rootfs/sys"     && sudo umount "$rootfs/sys"
-        mountpoint -q "$rootfs/proc"    && sudo umount "$rootfs/proc"
+        mountpoint -q "$rootfs/dev/pts" && sudo umount "$rootfs/dev/pts" || true
+        mountpoint -q "$rootfs/dev"     && sudo umount "$rootfs/dev" || true
+        mountpoint -q "$rootfs/sys"     && sudo umount "$rootfs/sys" || true
+        mountpoint -q "$rootfs/proc"    && sudo umount "$rootfs/proc" || true
     fi
 }
 trap cleanup EXIT
@@ -119,36 +141,38 @@ fi
 mkdir -p "$BUILD_DIR"/{rootfs,iso/boot/grub,iso/live}
 
 # =============================================================================
-# CREATE DEBIAN ROOTFS
+# BOOTSTRAP ROOTFS
 # =============================================================================
 
 ROOTFS="$BUILD_DIR/rootfs"
-# Create rootfs
-if [ ! -d "$ROOTFS/bin" ]; then
-    echo "[shadowos] Creating Debian rootfs with debootstrap..."
-    # Only install absolute minimum in debootstrap to avoid polkitd/dbus config errors
-    sudo debootstrap \
-        --arch=amd64 \
-        --variant=minbase \
-        --include=sudo,locales,console-setup,linux-image-amd64,live-boot,systemd-sysv \
-        bookworm "$ROOTFS" http://deb.debian.org/debian/
-    
-    log "Debian base installed"
-else
-    log "Using existing rootfs"
-fi
 
-# =============================================================================
-# CONFIGURE SYSTEM
-# =============================================================================
+if [[ "$STAGE" == "rootfs" || "$STAGE" == "all" ]]; then
+    # Create rootfs
+    if [ ! -d "$ROOTFS/bin" ]; then
+        echo "[shadowos] Creating Debian rootfs with debootstrap..."
+        # Only install absolute minimum in debootstrap to avoid polkitd/dbus config errors
+        sudo debootstrap \
+            --arch=amd64 \
+            --variant=minbase \
+            --include=sudo,locales,console-setup,linux-image-amd64,live-boot,systemd-sysv \
+            bookworm "$ROOTFS" http://deb.debian.org/debian/
+        
+        log "Debian base installed"
+    else
+        log "Using existing rootfs"
+    fi
 
-log "Configuring system..."
+    # =============================================================================
+    # CONFIGURE SYSTEM
+    # =============================================================================
 
-# Set hostname
-echo "shadowos" | sudo tee "$ROOTFS/etc/hostname" > /dev/null
+    log "Configuring system..."
 
-# Set OS identity
-sudo tee "$ROOTFS/etc/os-release" > /dev/null << 'OSRELEASE'
+    # Set hostname
+    echo "shadowos" | sudo tee "$ROOTFS/etc/hostname" > /dev/null
+
+    # Set OS identity
+    sudo tee "$ROOTFS/etc/os-release" > /dev/null << 'OSRELEASE'
 PRETTY_NAME="ShadowOS 1.0 (Based on Debian Bookworm)"
 NAME="ShadowOS"
 VERSION_ID="1.0"
@@ -161,9 +185,9 @@ SUPPORT_URL="https://shadowos.io/support"
 BUG_REPORT_URL="https://shadowos.io/bugs"
 OSRELEASE
 
-# Protect os-release from being overwritten by base-files upgrades
-sudo chroot "$ROOTFS" dpkg-divert --add --rename --divert /etc/os-release.debian /etc/os-release 2>/dev/null || true
-sudo tee "$ROOTFS/etc/os-release" > /dev/null << 'OSRELEASE2'
+    # Protect os-release from being overwritten by base-files upgrades
+    sudo chroot "$ROOTFS" dpkg-divert --add --rename --divert /etc/os-release.debian /etc/os-release 2>/dev/null || true
+    sudo tee "$ROOTFS/etc/os-release" > /dev/null << 'OSRELEASE2'
 PRETTY_NAME="ShadowOS 1.0 (Based on Debian Bookworm)"
 NAME="ShadowOS"
 VERSION_ID="1.0"
@@ -176,31 +200,33 @@ SUPPORT_URL="https://shadowos.io/support"
 BUG_REPORT_URL="https://shadowos.io/bugs"
 OSRELEASE2
 
-# Configure hosts
-sudo tee "$ROOTFS/etc/hosts" > /dev/null << 'EOF'
+    # Configure hosts
+    sudo tee "$ROOTFS/etc/hosts" > /dev/null << 'EOF'
 127.0.0.1   localhost
 127.0.1.1   shadowos
 
 ::1         localhost ip6-localhost ip6-loopback
 EOF
 
-# Configure locales
-sudo chroot "$ROOTFS" bash -c "echo 'en_US.UTF-8 UTF-8' > /etc/locale.gen && locale-gen"
+    # Configure locales
+    sudo chroot "$ROOTFS" bash -c "echo 'en_US.UTF-8 UTF-8' > /etc/locale.gen && locale-gen"
 
-# Set root password (empty for auto-login)
-sudo chroot "$ROOTFS" bash -c "echo 'root:' | chpasswd -e"
+    # Set root password (empty for auto-login)
+    sudo chroot "$ROOTFS" bash -c "echo 'root:' | chpasswd -e"
 
-# Configure repositories (Debian + Kali)
-sudo tee "$ROOTFS/etc/apt/sources.list" > /dev/null << 'EOF'
+    # Configure repositories (Debian + Kali)
+    sudo tee "$ROOTFS/etc/apt/sources.list" > /dev/null << 'EOF'
 # Debian Bookworm (base)
 deb http://deb.debian.org/debian bookworm main contrib non-free non-free-firmware
 deb http://deb.debian.org/debian bookworm-updates main contrib non-free non-free-firmware
 deb http://security.debian.org/debian-security bookworm-security main contrib non-free non-free-firmware
 EOF
 
-# Create Kali setup script (run post-install to enable Kali repos)
-log "Creating Kali repository setup script..."
-sudo tee "$ROOTFS/usr/bin/shadowos-kali-setup" > /dev/null << 'KALISETUP'
+    # Create Kali setup script (run post-install to enable Kali repos)
+    log "Creating Kali repository setup script..."
+    id
+    ls -ld "$ROOTFS/usr/bin"
+    cat > "$ROOTFS/usr/bin/shadowos-kali-setup" << 'KALISETUP'
 #!/bin/bash
 # ShadowOS - Enable Kali Repositories
 # Run this after first boot to add Kali repos for security tools
@@ -251,27 +277,41 @@ echo "[shadowos] Kali repository enabled!"
 echo "           Install tools with: apt install <package-name>"
 echo "           Debian packages take priority (PIN 100 for Kali)"
 KALISETUP
-sudo chmod +x "$ROOTFS/usr/bin/shadowos-kali-setup"
+    chmod +x "$ROOTFS/usr/bin/shadowos-kali-setup"
+    log "Kali script created successfully."
+fi # End rootfs stage
 
-# =============================================================================
-# INSTALL ADDITIONAL PACKAGES
-# =============================================================================
+if [[ "$STAGE" == "rootfs" ]]; then exit 0; fi
+
+if [[ "$STAGE" == "packages" || "$STAGE" == "all" ]]; then
+    # =============================================================================
+    # INSTALL ADDITIONAL PACKAGES
+    # =============================================================================
 
 
+    # Add VSCodium Repository (Code-OSS) (Requires gnupg)
+    if ! command -v gpg &> /dev/null; then
+        log "Installing gnupg..."
+        apt-get update && apt-get install -y gnupg
+    fi
 
-log "Installing additional packages..."
+    log "Adding VSCodium repo..."
+    curl -fsSL https://gitlab.com/paulcarroty/vscodium-deb-rpm-repo/raw/master/pub.gpg | gpg --batch --yes --dearmor -o "$ROOTFS/usr/share/keyrings/vscodium-archive-keyring.gpg"
+    echo 'deb [signed-by=/usr/share/keyrings/vscodium-archive-keyring.gpg] https://download.vscodium.com/debs vscodium main' | tee "$ROOTFS/etc/apt/sources.list.d/vscodium.list"
 
-# Mount required filesystems for chroot
-sudo mount --bind /dev "$ROOTFS/dev" || true
-sudo mount --bind /dev/pts "$ROOTFS/dev/pts" || true
-sudo mount -t proc proc "$ROOTFS/proc" || true
-sudo mount -t sysfs sysfs "$ROOTFS/sys" || true
+    log "Installing additional packages..."
 
-# Prevent services from starting in chroot
-echo "exit 101" | sudo tee "$ROOTFS/usr/sbin/policy-rc.d" > /dev/null
-sudo chmod +x "$ROOTFS/usr/sbin/policy-rc.d"
+    # Mount required filesystems for chroot
+    sudo mount --bind /dev "$ROOTFS/dev" || true
+    sudo mount --bind /dev/pts "$ROOTFS/dev/pts" || true
+    sudo mount -t proc proc "$ROOTFS/proc" || true
+    sudo mount -t sysfs sysfs "$ROOTFS/sys" || true
 
-# Install GUI and tools
+    # Prevent services from starting in chroot
+    echo "exit 101" | sudo tee "$ROOTFS/usr/sbin/policy-rc.d" > /dev/null
+    sudo chmod +x "$ROOTFS/usr/sbin/policy-rc.d"
+
+    # Install GUI and tools
     sudo chroot "$ROOTFS" apt-get update
     # Install packages (split into groups to avoid total failure)
     # 1. Core GUI & Drivers (XFCE + LightDM)
@@ -284,25 +324,23 @@ sudo chmod +x "$ROOTFS/usr/sbin/policy-rc.d"
         network-manager-gnome \
         xserver-xorg-video-vmware xserver-xorg-video-qxl xserver-xorg-video-all \
         pciutils usbutils \
-        firmware-linux-nonfree firmware-misc-nonfree firmware-realtek \
+        firmware-linux firmware-linux-nonfree firmware-misc-nonfree firmware-realtek \
+        git gnupg ca-certificates curl wget \
+        xfce4-whiskermenu-plugin menulibre \
+        xtables-addons-dkms xtables-addons-common linux-headers-amd64 dkms \
+        terminator codium zsh zsh-syntax-highlighting zsh-autosuggestions \
+        tor torsocks \
+        python3-gi python3-gi-cairo gir1.2-gtk-3.0 python3-psutil \
+        calamares calamares-settings-debian \
+        live-boot live-config live-config-systemd \
         || error "GUI Package installation failed!"
 
-    # 2. Tools & Network
-    sudo chroot "$ROOTFS" apt-get install -y --no-install-recommends \
-        grub-pc-bin grub-efi-amd64-bin \
-        iproute2 iputils-ping nano curl wget net-tools git \
-        gnupg ca-certificates \
-        fonts-dejavu ttf-bitstream-vera fonts-noto \
-        network-manager wpasupplicant \
-        nmap tcpdump iptables macchanger tor \
-        zsh mousepad xfce4-terminal \
-        arc-theme papirus-icon-theme adwaita-icon-theme \
-        xfce4-whiskermenu-plugin 
+    # (Redundant package installation block removed)
 
-# Configure XFCE Autostart (nm-applet, etc.)
-# XFCE handles most things automatically, just ensure nm-applet starts
-sudo mkdir -p "$ROOTFS/home/shadow/.config/autostart"
-sudo tee "$ROOTFS/home/shadow/.config/autostart/nm-applet.desktop" > /dev/null << 'NMAPPLET'
+    # Configure XFCE Autostart (nm-applet, etc.)
+    # XFCE handles most things automatically, just ensure nm-applet starts
+    sudo mkdir -p "$ROOTFS/home/shadow/.config/autostart"
+    sudo tee "$ROOTFS/home/shadow/.config/autostart/nm-applet.desktop" > /dev/null << 'NMAPPLET'
 [Desktop Entry]
 Type=Application
 Name=Network Manager Applet
@@ -311,8 +349,8 @@ Hidden=false
 X-GNOME-Autostart-enabled=true
 NMAPPLET
 
-# Create wallpaper setup autostart (ensures wallpaper is set at login)
-sudo tee "$ROOTFS/home/shadow/.config/autostart/shadowos-wallpaper.desktop" > /dev/null << 'WALLPAPER'
+    # Create wallpaper setup autostart (ensures wallpaper is set at login)
+    sudo tee "$ROOTFS/home/shadow/.config/autostart/shadowos-wallpaper.desktop" > /dev/null << 'WALLPAPER'
 [Desktop Entry]
 Type=Application
 Name=ShadowOS Wallpaper
@@ -321,29 +359,53 @@ Hidden=false
 X-GNOME-Autostart-enabled=true
 WALLPAPER
 
-# Create .zshrc for shadow user
-sudo touch "$ROOTFS/home/shadow/.zshrc"
-sudo tee "$ROOTFS/home/shadow/.zshrc" > /dev/null << 'ZSHRC'
-# ShadowOS zsh configuration
+    # Set default shell to ZSH for future users
+    log "Setting default shell to ZSH..."
+    sudo chroot "$ROOTFS" sed -i 's|^SHELL=.*|SHELL=/bin/zsh|' /etc/default/useradd
+    sudo chroot "$ROOTFS" sed -i 's|^DSHELL=.*|DSHELL=/bin/zsh|' /etc/adduser.conf
+
+    # Create .zshrc for shadow user
+    sudo tee "$ROOTFS/home/shadow/.zshrc" > /dev/null << 'ZSHRC'
+# ShadowOS .zshrc
 export PATH="$HOME/.local/bin:$PATH"
+
+# Enable Powerlevel10k-like simplified prompt
+autoload -Uz promptinit
+promptinit
+PROMPT='%F{red}┌──(%F{cyan}%n㉿%m%F{red})-[%F{white}%~%F{red}]
+└─%F{red}$%f '
+
+# History
+HISTFILE=~/.zsh_history
+HISTSIZE=1000
+SAVEHIST=1000
+setopt SHARE_HISTORY
+
+# Aliases
 alias ll='ls -la'
 alias la='ls -A'
 alias l='ls -CF'
-# Prompt
-PS1='%F{cyan}%n@%m%f:%F{blue}%~%f$ '
+alias update='sudo shadowos-update'
+alias tor-on='shadow-control-center --tor-on'
+alias tor-off='shadow-control-center --tor-off'
+alias chaos-on='shadow-control-center --chaos-on'
+
+# Plugins (Syntax Highlighting & Autosuggestions)
+source /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh 2>/dev/null || true
+source /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh 2>/dev/null || true
 ZSHRC
+    sudo chown 1000:1000 "$ROOTFS/home/shadow/.zshrc"
 
-# Install ShadowOS branding
-log "Installing ShadowOS branding..."
-# Desktop wallpaper
-sudo mkdir -p "$ROOTFS/usr/share/backgrounds/shadowos"
-if [ -f "$SHADOWOS_DIR/assets/wallpaper.png" ]; then
-    sudo cp "$SHADOWOS_DIR/assets/wallpaper.png" "$ROOTFS/usr/share/backgrounds/shadowos/wallpaper.png"
-fi
+    # Install ShadowOS branding
+    log "Installing ShadowOS branding..."
+    sudo mkdir -p "$ROOTFS/usr/share/backgrounds/shadowos"
+    if [ -f "$SHADOWOS_DIR/assets/wallpaper.png" ]; then
+        sudo cp "$SHADOWOS_DIR/assets/wallpaper.png" "$ROOTFS/usr/share/backgrounds/shadowos/wallpaper.png"
+    fi
 
-# XFCE default wallpaper config (using monitor0 which is more universal)
-sudo mkdir -p "$ROOTFS/home/shadow/.config/xfce4/xfconf/xfce-perchannel-xml"
-sudo tee "$ROOTFS/home/shadow/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml" > /dev/null << 'XFCEDESK'
+    # XFCE default wallpaper config (using monitor0 which is more universal)
+    sudo mkdir -p "$ROOTFS/home/shadow/.config/xfce4/xfconf/xfce-perchannel-xml"
+    sudo tee "$ROOTFS/home/shadow/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml" > /dev/null << 'XFCEDESK'
 <?xml version="1.0" encoding="UTF-8"?>
 <channel name="xfce4-desktop" version="1.0">
   <property name="backdrop" type="empty">
@@ -365,15 +427,15 @@ sudo tee "$ROOTFS/home/shadow/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-des
 </channel>
 XFCEDESK
 
-# Boot logo will be copied later to ISO directory (not rootfs)
-# See GRUB configuration section
+    # Boot logo will be copied later to ISO directory (not rootfs)
+    # See GRUB configuration section
 
-# Configure XFCE theme - Arc-Dark with Papirus icons
-log "Configuring XFCE modern theme..."
-sudo mkdir -p "$ROOTFS/home/shadow/.config/xfce4/xfconf/xfce-perchannel-xml"
+    # Configure XFCE theme - Arc-Dark with Papirus icons
+    log "Configuring XFCE modern theme..."
+    sudo mkdir -p "$ROOTFS/home/shadow/.config/xfce4/xfconf/xfce-perchannel-xml"
 
-# xsettings - GTK theme and icons
-sudo tee "$ROOTFS/home/shadow/.config/xfce4/xfconf/xfce-perchannel-xml/xsettings.xml" > /dev/null << 'XSETTINGS'
+    # xsettings - GTK theme and icons
+    sudo tee "$ROOTFS/home/shadow/.config/xfce4/xfconf/xfce-perchannel-xml/xsettings.xml" > /dev/null << 'XSETTINGS'
 <?xml version="1.0" encoding="UTF-8"?>
 <channel name="xsettings" version="1.0">
   <property name="Net" type="empty">
@@ -387,8 +449,8 @@ sudo tee "$ROOTFS/home/shadow/.config/xfce4/xfconf/xfce-perchannel-xml/xsettings
 </channel>
 XSETTINGS
 
-# xfwm4 - Window manager with compositor
-sudo tee "$ROOTFS/home/shadow/.config/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml" > /dev/null << 'XFWM4'
+    # xfwm4 - Window manager with compositor
+    sudo tee "$ROOTFS/home/shadow/.config/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml" > /dev/null << 'XFWM4'
 <?xml version="1.0" encoding="UTF-8"?>
 <channel name="xfwm4" version="1.0">
   <property name="general" type="empty">
@@ -402,8 +464,8 @@ sudo tee "$ROOTFS/home/shadow/.config/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml
 </channel>
 XFWM4
 
-# xfce4-panel - Modern dark panel with Whisker Menu
-sudo tee "$ROOTFS/home/shadow/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml" > /dev/null << 'XFCEPANEL'
+    # xfce4-panel - Modern dark panel with Whisker Menu
+    sudo tee "$ROOTFS/home/shadow/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml" > /dev/null << 'XFCEPANEL'
 <?xml version="1.0" encoding="UTF-8"?>
 <channel name="xfce4-panel" version="1.0">
   <property name="configver" type="int" value="2"/>
@@ -444,10 +506,6 @@ sudo tee "$ROOTFS/home/shadow/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-pan
     <property name="plugin-3" type="string" value="tasklist">
        <property name="grouping" type="bool" value="true"/>
     </property>
-    <property name="plugin-4" type="string" value="separator">
-       <property name="expand" type="bool" value="true"/>
-       <property name="style" type="uint" value="0"/>
-    </property>
     <property name="plugin-5" type="string" value="pager"/>
     <property name="plugin-6" type="string" value="systray">
        <property name="show-frame" type="bool" value="false"/>
@@ -457,9 +515,40 @@ sudo tee "$ROOTFS/home/shadow/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-pan
 </channel>
 XFCEPANEL
 
-# Force panel geometry script (fix for floating panel)
-log "Creating panel fix script..."
-sudo tee "$ROOTFS/usr/bin/shadowos-fix-panel" > /dev/null << 'FIXPANEL'
+    # Configure NetworkManager for Anonymity (MAC Randomization & Hostname)
+    sudo tee "$ROOTFS/etc/NetworkManager/NetworkManager.conf" > /dev/null << 'NMCONF'
+[main]
+plugins=ifupdown,keyfile
+dhcp=internal
+# Anonymity: Send generic hostname
+hostname-mode=none
+
+[ifupdown]
+managed=false
+
+[device]
+# Anonymity: Randomize MAC address for Wi-Fi and Ethernet
+wifi.scan-rand-mac-address=yes
+
+[connection]
+# Randomize MAC for every new connection
+wifi.cloned-mac-address=random
+ethernet.cloned-mac-address=random
+NMCONF
+    sudo chmod 644 "$ROOTFS/etc/NetworkManager/NetworkManager.conf"
+
+    # Remove duplicate apt install block (Cleanup)
+    # The previous redundant block (Tools & Network) is removed/merged.
+fi # End packages stage
+
+if [[ "$STAGE" == "config" || "$STAGE" == "all" ]]; then
+    # =============================================================================
+    # CONFIGURATION
+    # =============================================================================
+
+    # Force panel geometry script (fix for floating panel)
+    log "Creating panel fix script..."
+    sudo tee "$ROOTFS/usr/bin/shadowos-fix-panel" > /dev/null << 'FIXPANEL'
 #!/bin/bash
 # Force XFCE panel to correct geometry
 sleep 3
@@ -470,11 +559,11 @@ xfconf-query -c xfce4-panel -p /panels/panel-1/size -n -t uint -s 32
 xfconf-query -c xfce4-panel -p /panels/panel-1/position -n -t string -s "p=12;x=0;y=0"
 xfconf-query -c xfce4-panel -p /panels/panel-1/mode -n -t uint -s 0
 FIXPANEL
-sudo chmod +x "$ROOTFS/usr/bin/shadowos-fix-panel"
+    sudo chmod +x "$ROOTFS/usr/bin/shadowos-fix-panel"
 
-# Autostart for panel fix
-sudo mkdir -p "$ROOTFS/etc/xdg/autostart"
-sudo tee "$ROOTFS/etc/xdg/autostart/shadowos-fix-panel.desktop" > /dev/null << 'AUTOSTART'
+    # Autostart for panel fix
+    sudo mkdir -p "$ROOTFS/etc/xdg/autostart"
+    sudo tee "$ROOTFS/etc/xdg/autostart/shadowos-fix-panel.desktop" > /dev/null << 'AUTOSTART'
 [Desktop Entry]
 Type=Application
 Name=Fix Panel Geometry
@@ -484,20 +573,20 @@ StartupNotify=false
 Hidden=false
 AUTOSTART
 
-# Set ownership
+    # Set ownership
 
-sudo chown -R 1000:1000 "$ROOTFS/home/shadow/.config"
-sudo chown 1000:1000 "$ROOTFS/home/shadow/.zshrc"
+    sudo chown -R 1000:1000 "$ROOTFS/home/shadow/.config"
+    sudo chown 1000:1000 "$ROOTFS/home/shadow/.zshrc"
 
-# Configure LightDM to allow manual login (or auto if preferred, but manual requested)
-# We ensure the greeter is set
-sudo mkdir -p "$ROOTFS/etc/lightdm"
-echo "[Seat:*]" | sudo tee "$ROOTFS/etc/lightdm/lightdm.conf" > /dev/null
-echo "greeter-session=lightdm-gtk-greeter" | sudo tee -a "$ROOTFS/etc/lightdm/lightdm.conf" > /dev/null
-echo "user-session=xfce" | sudo tee -a "$ROOTFS/etc/lightdm/lightdm.conf" > /dev/null
+    # Configure LightDM to allow manual login (or auto if preferred, but manual requested)
+    # We ensure the greeter is set
+    sudo mkdir -p "$ROOTFS/etc/lightdm"
+    echo "[Seat:*]" | sudo tee "$ROOTFS/etc/lightdm/lightdm.conf" > /dev/null
+    echo "greeter-session=lightdm-gtk-greeter" | sudo tee -a "$ROOTFS/etc/lightdm/lightdm.conf" > /dev/null
+    echo "user-session=xfce" | sudo tee -a "$ROOTFS/etc/lightdm/lightdm.conf" > /dev/null
 
-# Update .bash_profile (Optional now since LightDM handles login)
-sudo tee "$ROOTFS/home/shadow/.bash_profile" > /dev/null << 'PROFILE'
+    # Update .bash_profile (Optional now since LightDM handles login)
+    sudo tee "$ROOTFS/home/shadow/.bash_profile" > /dev/null << 'PROFILE'
 # ShadowOS
 if [ -z "$DISPLAY" ] && [ "$(tty)" = "/dev/tty1" ]; then
     echo "Welcome to ShadowOS."
@@ -513,47 +602,47 @@ if [ -e /dev/ttyS0 ] && [ -w /dev/ttyS0 ]; then
     } > /dev/ttyS0 2>/dev/null
 fi
 PROFILE
-sudo chown 1000:1000 "$ROOTFS/home/shadow/.bash_profile"
+    sudo chown 1000:1000 "$ROOTFS/home/shadow/.bash_profile"
 
-log "Creating 'shadow' user (post-package install)..."
-# Create shadow user
-echo "[shadowos] Creating 'shadow' user..."
-# We use -g shadow (GID 42) which exists in base. Other groups (dialout, netdev) exist after package install.
-# Switch to Zsh default
-sudo chroot "$ROOTFS" useradd -m -s /usr/bin/zsh -g shadow -G sudo,video,input,plugdev,dialout,audio,netdev shadow || true
-sudo chroot "$ROOTFS" sh -c 'echo "shadow:shadow" | chpasswd'
-echo "shadow ALL=(ALL) NOPASSWD: ALL" | sudo tee "$ROOTFS/etc/sudoers.d/shadow" > /dev/null
-sudo chmod 0440 "$ROOTFS/etc/sudoers.d/shadow"
+    log "Creating 'shadow' user (post-package install)..."
+    # Create shadow user
+    echo "[shadowos] Creating 'shadow' user..."
+    # We use -g shadow (GID 42) which exists in base. Other groups (dialout, netdev) exist after package install.
+    # Switch to Zsh default
+    sudo chroot "$ROOTFS" useradd -m -s /usr/bin/zsh -g shadow -G sudo,video,input,plugdev,dialout,audio,netdev shadow || true
+    sudo chroot "$ROOTFS" sh -c 'echo "shadow:shadow" | chpasswd'
+    echo "shadow ALL=(ALL) NOPASSWD: ALL" | sudo tee "$ROOTFS/etc/sudoers.d/shadow" > /dev/null
+    sudo chmod 0440 "$ROOTFS/etc/sudoers.d/shadow"
 
-# Clean apt cache
-sudo chroot "$ROOTFS" apt-get clean
-sudo rm -rf "$ROOTFS/var/lib/apt/lists/"*
+    # Clean apt cache
+    sudo chroot "$ROOTFS" apt-get clean
+    sudo rm -rf "$ROOTFS/var/lib/apt/lists/"*
 
-# Unmount
-sudo umount "$ROOTFS/sys" 2>/dev/null || true
-sudo umount "$ROOTFS/proc" 2>/dev/null || true
-sudo umount "$ROOTFS/dev/pts" 2>/dev/null || true
-sudo umount "$ROOTFS/dev" 2>/dev/null || true
+    # Unmount
+    sudo umount "$ROOTFS/sys" 2>/dev/null || true
+    sudo umount "$ROOTFS/proc" 2>/dev/null || true
+    sudo umount "$ROOTFS/dev/pts" 2>/dev/null || true
+    sudo umount "$ROOTFS/dev" 2>/dev/null || true
 
-log "Packages installed"
+    log "Packages installed"
 
-# =============================================================================
-# CONFIGURE SYSTEMD
-# =============================================================================
+    # =============================================================================
+    # CONFIGURE SYSTEMD
+    # =============================================================================
 
-log "Configuring systemd..."
+    log "Configuring systemd..."
 
-# Auto-login on tty1
-sudo mkdir -p "$ROOTFS/etc/systemd/system/getty@tty1.service.d"
-# Auto-login config - DISABLED to fix flashing loop
-# cat > "$ROOTFS/etc/systemd/system/getty@tty1.service.d/autologin.conf" << 'SERVICE'
-# [Service]
-# ExecStart=
-# ExecStart=-/sbin/agetty --autologin shadow --noclear %I $TERM
-# SERVICEOF
+    # Auto-login on tty1
+    sudo mkdir -p "$ROOTFS/etc/systemd/system/getty@tty1.service.d"
+    # Auto-login config - DISABLED to fix flashing loop
+    # cat > "$ROOTFS/etc/systemd/system/getty@tty1.service.d/autologin.conf" << 'SERVICE'
+    # [Service]
+    # ExecStart=
+    # ExecStart=-/sbin/agetty --autologin shadow --noclear %I $TERM
+    # SERVICEOF
 
-# Create ShadowOS security service
-sudo tee "$ROOTFS/etc/systemd/system/shadowos.service" > /dev/null << 'EOF'
+    # Create ShadowOS security service
+    sudo tee "$ROOTFS/etc/systemd/system/shadowos.service" > /dev/null << 'EOF'
 [Unit]
 Description=ShadowOS Security Hardening
 After=network.target
@@ -569,21 +658,130 @@ StandardError=journal
 WantedBy=multi-user.target
 EOF
 
-# Enable services
-sudo chroot "$ROOTFS" systemctl enable shadowos.service 2>/dev/null || true
-sudo chroot "$ROOTFS" systemctl enable NetworkManager.service 2>/dev/null || true
+    # Configure GRUB with Persistence and Custom Theme
+    log "Configuring GRUB..."
 
-# LXDE config is handled automatically by task-lxde-desktop
+    # 1. Create Theme Directory
+    sudo mkdir -p "$ROOTFS/boot/grub/themes/shadowos"
 
-# Configure .xinitrc for LXDE
-sudo tee "$ROOTFS/home/shadow/.xinitrc" > /dev/null << 'XINIT'
+    # 2. Add Persistence to GRUB
+    # We modify the grub.cfg generation or add a custom entry
+    # For live-build/Debian ISOs, usually in boot/grub/grub.cfg or loopback.cfg
+    # We'll create a robust grub.cfg that includes Persistence
+
+    sudo tee "$ROOTFS/boot/grub/grub.cfg" > /dev/null << 'GRUBCFG'
+set default=0
+set timeout=10
+
+insmod efi_gop
+insmod efi_uga
+insmod video_bochs
+insmod video_cirrus
+insmod gfxterm
+insmod png
+
+loadfont /boot/grub/themes/shadowos/terminus-16.pf2
+terminal_output gfxterm
+
+set theme=/boot/grub/themes/shadowos/theme.txt
+export theme
+
+menuentry "ShadowOS Live (Forensic Mode)" {
+    linux /live/vmlinuz boot=live components quiet splash
+    initrd /live/initrd.img
+}
+
+menuentry "ShadowOS Live (Persistence)" {
+    linux /live/vmlinuz boot=live components quiet splash persistence
+    initrd /live/initrd.img
+}
+
+menuentry "Install ShadowOS (Graphical)" {
+    linux /live/vmlinuz boot=live components quiet splash
+    initrd /live/initrd.img
+    # In live session, user runs Calamares
+}
+GRUBCFG
+
+    # Configure Calamares Installer
+    log "Configuring Calamares..."
+    sudo mkdir -p "$ROOTFS/etc/calamares/modules"
+    sudo mkdir -p "$ROOTFS/etc/calamares/branding/shadowos"
+
+    # Minimal branding/settings needed for functional install
+    sudo tee "$ROOTFS/etc/calamares/settings.conf" > /dev/null << 'CALAMARES'
+modules-search: [ local ]
+
+instances:
+- id:       user
+  module:   users
+  config:   users.conf
+
+sequence:
+- show:
+  - welcome
+  - location
+  - keyboard
+  - partition
+  - users
+  - summary
+- exec:
+  - partition
+  - mount
+  - unpackfs
+  - machineid
+  - fstab
+  - locale
+  - keyboard
+  - localecfg
+  - users
+  - networkcfg
+  - hwclock
+  - services-systemd
+  - grubcfg
+  - bootloader
+  - umount
+- show:
+  - finished
+
+branding: shadowos
+prompt-install: true
+dont-chroot: false
+oem-setup: false
+disable-cancel: false
+disable-cancel-during-exec: true
+quit-at-end: false
+CALAMARES
+
+    # Create Desktop shortcut for installer
+    sudo mkdir -p "$ROOTFS/home/shadow/Desktop"
+    sudo chown 1000:1000 "$ROOTFS/home/shadow/Desktop"
+    sudo tee "$ROOTFS/home/shadow/Desktop/install-shadowos.desktop" > /dev/null << 'INSTDESK'
+[Desktop Entry]
+Type=Application
+Name=Install ShadowOS
+Exec=sudo calamares
+Icon=calamares
+Terminal=false
+INSTDESK
+    sudo chmod +x "$ROOTFS/home/shadow/Desktop/install-shadowos.desktop"
+    sudo chown 1000:1000 "$ROOTFS/home/shadow/Desktop/install-shadowos.desktop"
+
+    # Enable services
+    sudo chroot "$ROOTFS" systemctl enable shadowos.service 2>/dev/null || true
+    sudo chroot "$ROOTFS" systemctl enable NetworkManager.service 2>/dev/null || true
+
+    # LXDE config is handled automatically by task-lxde-desktop
+
+    # Configure .xinitrc for LXDE
+    sudo tee "$ROOTFS/home/shadow/.xinitrc" > /dev/null << 'XINIT'
 #!/bin/sh
 exec openbox-session
 XINIT
-sudo chmod +x "$ROOTFS/home/shadow/.xinitrc"
+    sudo chmod +x "$ROOTFS/home/shadow/.xinitrc"
 
-# Configure .bash_profile (Manual start)
-sudo tee "$ROOTFS/home/shadow/.bash_profile" > /dev/null << 'PROFILE'
+    # Configure .bash_profile (Manual start)
+    sudo tee "$ROOTFS/home/shadow/.bash_profile" > /dev/null << 'PROFILE'
 if [ -z "$DISPLAY" ] && [ "$(tty)" = "/dev/tty1" ]; then
     clear
     cat /etc/motd
@@ -607,25 +805,325 @@ if [ -z "$DISPLAY" ] && [ "$(tty)" = "/dev/tty1" ]; then
 fi
 PROFILE
 
-# Fix permissions
-sudo chroot "$ROOTFS" chown -R shadow:shadow /home/shadow
+    # Fix permissions
+    sudo chroot "$ROOTFS" chown -R shadow:shadow /home/shadow
 
-log "systemd configured"
+    log "systemd configured"
 
-# =============================================================================
-# INSTALL SHADOWOS COMPONENTS
-# =============================================================================
+    # =============================================================================
+    # INSTALL SHADOWOS COMPONENTS
+    # =============================================================================
 
-log "Installing ShadowOS components..."
+    log "Installing ShadowOS components..."
 
-# Copy ShadowOS tools
-sudo cp -r "$SHADOWOS_DIR/usr" "$ROOTFS/" 2>/dev/null || true
+    # Copy ShadowOS tools
+    sudo cp -r "$SHADOWOS_DIR/usr" "$ROOTFS/" 2>/dev/null || true
 
-# Set permissions
-sudo chmod +x "$ROOTFS/usr/bin/"* 2>/dev/null || true
+    # Create shadow-api (Backend for Control Center)
+    sudo tee "$ROOTFS/usr/bin/shadow-api" > /dev/null << 'SHADOWAPI'
+#!/usr/bin/env python3
+import sys
+import subprocess
+import json
+import os
 
-# Create shadow-harden script if not exists
-if [[ ! -f "$ROOTFS/usr/bin/shadow-harden" ]]; then
+# ShadowOS Kernel API
+# Manages iptables (Netfilter), sysctl, and systemd services
+
+def run_cmd(cmd):
+    try:
+        subprocess.run(cmd, shell=True, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+    except:
+        return False
+
+def check_service(service):
+    return run_cmd(f"systemctl is-active --quiet {service}")
+
+def check_process(name):
+    return run_cmd(f"pgrep -f {name}")
+
+def get_status():
+    status = {
+        "chaos_mode": False,
+        "stealth_mode": False,
+        "tor_mode": False,
+        "polymorph": check_service("shadow-polymorph"),
+        "identity": "unknown"
+    }
+    
+    # Check Chaos Mode (iptables rule)
+    if run_cmd("iptables -C INPUT -p tcp -m statistic --mode random --probability 0.33 -j DROP 2>/dev/null") or \
+       run_cmd("iptables -C INPUT -j CHAOS 2>/dev/null"): # Future CHAOS check
+        status["chaos_mode"] = True
+        
+    # Check Stealth (sysctl)
+    try:
+        with open("/proc/sys/net/ipv4/icmp_echo_ignore_all", "r") as f:
+            if f.read().strip() == "1":
+                status["stealth_mode"] = True
+    except:
+        pass
+
+    # Check Identity
+    try:
+        with open("/etc/issue", "r") as f:
+            issue = f.read().lower()
+            if "windows" in issue: status["identity"] = "Windows"
+            elif "ubuntu" in issue: status["identity"] = "Ubuntu"
+            elif "fedora" in issue: status["identity"] = "Fedora"
+            elif "arch" in issue: status["identity"] = "Arch"
+            elif "cisco" in issue: status["identity"] = "Cisco"
+            else: status["identity"] = "ShadowOS"
+    except:
+        pass
+
+    return json.dumps(status)
+
+def f_chaos(enable):
+    if enable:
+        # Use shadow-harden fuzz mode (which we will update to use CHAOS if avail)
+        # For now, falls back to userspace-like netfilter rules if CHAOS module missing
+        run_cmd("/usr/bin/shadow-harden fuzz")
+    else:
+        # Flush fuzz/chaos rules
+        # Simple flush for now (Production: specific chain delete)
+        run_cmd("iptables -D INPUT -p tcp -m multiport --dports 21,23,25,80,443,445,3389,8080 -m statistic --mode random --probability 0.33 -j DROP")
+        run_cmd("iptables -D INPUT -p tcp -m multiport --dports 21,23,25,80,443,445,3389,8080 -m statistic --mode random --probability 0.5 -j REJECT --reject-with tcp-reset")
+        run_cmd("iptables -D INPUT -p tcp -m multiport --dports 21,23,25,80,443,445,3389,8080 -j REJECT --reject-with icmp-host-prohibited")
+        # Try removing CHAOS target if used
+        run_cmd("iptables -D INPUT -p tcp -j CHAOS --tarpit 2>/dev/null")
+
+def f_stealth(enable):
+    if enable:
+        run_cmd("/usr/bin/shadow-harden stealth")
+    else:
+        # Revert to standard
+        run_cmd("sysctl -w net.ipv4.icmp_echo_ignore_all=0")
+        run_cmd("sysctl -w net.ipv4.tcp_timestamps=1")
+        run_cmd("sysctl -w net.ipv4.ip_default_ttl=64")
+
+def f_tor(enable):
+    if enable:
+        # Transparent Proxy (TCP -> 9040, DNS -> 5353)
+        # 1. TCP
+        run_cmd("iptables -t nat -A OUTPUT -m owner --uid-owner debian-tor -j RETURN")
+        run_cmd("iptables -t nat -A OUTPUT -p tcp --syn -j REDIRECT --to-ports 9040")
+        # 2. DNS (UDP/TCP)
+        run_cmd("iptables -t nat -A OUTPUT -m owner --uid-owner debian-tor -j RETURN")
+        run_cmd("iptables -t nat -A OUTPUT -p udp --dport 53 -j REDIRECT --to-ports 5353")
+        run_cmd("iptables -t nat -A OUTPUT -p tcp --dport 53 -j REDIRECT --to-ports 5353")
+        # 3. Block other UDP (Leak protection)
+        run_cmd("iptables -A OUTPUT -m owner --uid-owner debian-tor -j ACCEPT")
+        run_cmd("iptables -A OUTPUT -p udp --dport 53 -j DROP") # Allow redirected only
+        
+        # Configure Tor (Ensure TransPort/DNSPort are set)
+        if not os.path.exists("/etc/tor/torrc.d/shadowwc.conf"):
+             with open("/etc/tor/torrc.d/shadowos.conf", "w") as f:
+                 f.write("TransPort 0.0.0.0:9040\nDNSPort 0.0.0.0:5353\nAutomapHostsOnResolve 1\n")
+        run_cmd("systemctl restart tor")
+    else:
+        # Flush Tor NAT rules
+        run_cmd("iptables -t nat -F OUTPUT")
+        # Allow UDP again
+        run_cmd("iptables -D OUTPUT -p udp --dport 53 -j DROP 2>/dev/null")
+
+def f_polymorph(enable):
+    if enable:
+        run_cmd("systemctl start shadow-polymorph")
+        run_cmd("systemctl enable shadow-polymorph")
+    else:
+        run_cmd("systemctl stop shadow-polymorph")
+        run_cmd("systemctl disable shadow-polymorph")
+
+def f_rotate(identity):
+    # Manual rotation wrapper around shadow-harden logic
+    # We can invoke specific rotation via env var or arg in future
+    # For now, just trigger random rotation
+    run_cmd("/usr/bin/shadow-harden rotate")
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print(get_status())
+        sys.exit(0)
+    
+    cmd = sys.argv[1]
+    
+    if cmd == "status":
+        print(get_status())
+    elif cmd == "chaos":
+        f_chaos(sys.argv[2] == "on")
+    elif cmd == "stealth":
+        f_stealth(sys.argv[2] == "on")
+    elif cmd == "tor":
+        f_tor(sys.argv[2] == "on")
+    elif cmd == "polymorph":
+        f_polymorph(sys.argv[2] == "on")
+    elif cmd == "rotate":
+        f_rotate(sys.argv[2] if len(sys.argv) > 2 else None)
+    else:
+        print("Unknown command")
+SHADOWAPI
+    sudo chmod +x "$ROOTFS/usr/bin/shadow-api"
+
+    # Create Shadow Control Center (GUI)
+    sudo tee "$ROOTFS/usr/bin/shadow-control-center" > /dev/null << 'CONTROL'
+#!/usr/bin/env python3
+import gi
+import sys
+import subprocess
+import json
+import threading
+import time
+gi.require_version('Gtk', '3.0')
+from gi.repository import Gtk, Gdk, GLib
+
+# ShadowOS Control Center
+# Robust UI for managing Security, Identity, and Anonymity
+
+class ShadowControl(Gtk.Window):
+    def __init__(self):
+        super().__init__(title="ShadowOS Control Center")
+        self.set_border_width(10)
+        self.set_default_size(600, 450)
+        self.set_position(Gtk.WindowPosition.CENTER)
+        self.set_icon_name("security-high")
+
+        # Main Layout
+        main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        self.add(main_box)
+
+        # Header
+        header = Gtk.HeaderBar()
+        header.set_show_close_button(True)
+        header.set_title("ShadowOS Active Defense")
+        header.set_subtitle("Control & Command")
+        self.set_titlebar(header)
+
+        # Notebook (Tabs)
+        notebook = Gtk.Notebook()
+        main_box.pack_start(notebook, True, True, 0)
+
+        # --- TAB 1: DEFENSE ---
+        defense_grid = Gtk.Grid()
+        defense_grid.set_column_spacing(20)
+        defense_grid.set_row_spacing(20)
+        defense_grid.set_margin_top(20)
+        defense_grid.set_margin_bottom(20)
+        defense_grid.set_margin_start(20)
+        defense_grid.set_margin_end(20)
+
+        # Chaos Mode
+        lbl_chaos = Gtk.Label(xalign=0)
+        lbl_chaos.set_markup("<b>Chaos Fuzzing</b>\n<small>Randomly drops/rejects/tarpits traffic (Kernel-Level)</small>")
+        self.sw_chaos = Gtk.Switch()
+        self.sw_chaos.connect("state-set", self.on_chaos_toggle)
+        defense_grid.attach(lbl_chaos, 0, 0, 1, 1)
+        defense_grid.attach(self.sw_chaos, 1, 0, 1, 1)
+
+        # Stealth Mode
+        lbl_stealth = Gtk.Label(xalign=0)
+        lbl_stealth.set_markup("<b>Extreme Stealth</b>\n<small>TTL 128, No Timestamps, Ignore ICMP (Windows-like)</small>")
+        self.sw_stealth = Gtk.Switch()
+        self.sw_stealth.connect("state-set", self.on_stealth_toggle)
+        defense_grid.attach(lbl_stealth, 0, 1, 1, 1)
+        defense_grid.attach(self.sw_stealth, 1, 1, 1, 1)
+
+        # Tor Mode
+        lbl_tor = Gtk.Label(xalign=0)
+        lbl_tor.set_markup("<b>Tor Transparent Proxy</b>\n<small>Route all TCP traffic through Tor network</small>")
+        self.sw_tor = Gtk.Switch()
+        self.sw_tor.connect("state-set", self.on_tor_toggle)
+        defense_grid.attach(lbl_tor, 0, 2, 1, 1)
+        defense_grid.attach(self.sw_tor, 1, 2, 1, 1)
+
+        notebook.append_page(defense_grid, Gtk.Label(label="Active Defense"))
+
+        # --- TAB 2: IDENTITY ---
+        idx_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=20)
+        idx_box.set_margin_top(20)
+        idx_box.set_margin_start(20)
+
+        # Polymorph Status
+        poly_box = Gtk.Box(spacing=10)
+        lbl_poly = Gtk.Label(xalign=0)
+        lbl_poly.set_markup("<b>Polymorphic Daemon</b>\n<small>Automatically rotates identity every 60s</small>")
+        self.sw_poly = Gtk.Switch()
+        self.sw_poly.connect("state-set", self.on_poly_toggle)
+        poly_box.pack_start(lbl_poly, True, True, 0)
+        poly_box.pack_start(self.sw_poly, False, False, 0)
+        idx_box.pack_start(poly_box, False, False, 0)
+
+        # Manual Rotation
+        rot_box = Gtk.Box(spacing=10)
+        btn_rot = Gtk.Button(label="Rotate Identity Now")
+        btn_rot.connect("clicked", self.on_rotate_click)
+        self.lbl_id = Gtk.Label(label="Current Identity: Unknown")
+        rot_box.pack_start(btn_rot, False, False, 0)
+        rot_box.pack_start(self.lbl_id, False, False, 0)
+        idx_box.pack_start(rot_box, False, False, 0)
+
+        notebook.append_page(idx_box, Gtk.Label(label="Identity"))
+
+        # --- UPDATE UI ---
+        self.update_ui()
+        
+        # Start timer for status updates
+        GLib.timeout_add_seconds(5, self.update_ui)
+
+    def run_api(self, cmd):
+        subprocess.run(f"shadow-api {cmd}", shell=True)
+
+    def update_ui(self):
+        try:
+            res = subprocess.check_output("shadow-api status", shell=True)
+            status = json.loads(res)
+            
+            self.sw_chaos.set_active(status.get("chaos_mode", False))
+            self.sw_stealth.set_active(status.get("stealth_mode", False))
+            self.sw_poly.set_active(status.get("polymorph", False))
+            self.lbl_id.set_label(f"Current Identity: {status.get('identity', 'Unknown')}")
+            # Tor check future implementation
+        except:
+            pass
+        return True
+
+    def on_chaos_toggle(self, switch, state):
+        self.run_api(f"chaos {'on' if state else 'off'}")
+        
+    def on_stealth_toggle(self, switch, state):
+        self.run_api(f"stealth {'on' if state else 'off'}")
+        
+    def on_tor_toggle(self, switch, state):
+        self.run_api(f"tor {'on' if state else 'off'}")
+        
+    def on_poly_toggle(self, switch, state):
+        self.run_api(f"polymorph {'on' if state else 'off'}")
+
+    def on_rotate_click(self, btn):
+        self.run_api("rotate")
+        self.update_ui()
+
+win = ShadowControl()
+win.connect("destroy", Gtk.main_quit)
+win.show_all()
+Gtk.main()
+CONTROL
+    sudo chmod +x "$ROOTFS/usr/bin/shadow-control-center"
+
+    # Create Desktop Entry for Control Center
+    sudo tee "$ROOTFS/usr/share/applications/shadow-control.desktop" > /dev/null << 'DESKTOP'
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Shadow Control Center
+Comment=Manage Active Defense and Anonymity
+Exec=sudo shadow-control-center
+Icon=security-high
+Categories=System;Settings;Security;
+Terminal=false
+DESKTOP
+    sudo chmod +x "$ROOTFS/usr/share/applications/shadow-control.desktop"
     sudo tee "$ROOTFS/usr/bin/shadow-harden" > /dev/null << 'HARDEN'
 #!/bin/bash
 # ShadowOS Security Hardening & Network Deception
@@ -638,12 +1136,18 @@ echo "   ShadowOS Security Hardening & Stealth"
 echo "=============================================="
 echo ""
 
+# Helper to check if rule exists
+iptables_exists() {
+    iptables -C "$@" 2>/dev/null
+}
+
 case "$MODE" in
     full|all)
         # Run all hardening
         $0 kernel
         $0 network
         $0 stealth
+        $0 fuzz
         ;;
     kernel)
         echo "[shadowos] Applying kernel hardening..."
@@ -706,6 +1210,36 @@ case "$MODE" in
         
         echo ""
         echo "[shadowos] Stealth mode activated - device now looks like Windows with Polymorph active"
+        ;;
+    fuzz)
+        echo "[shadowos] Activating Kernel-Level Network Fuzzing (CHAOS)..."
+        
+        # Load xt_CHAOS module if available
+        modprobe xt_CHAOS 2>/dev/null || true
+        
+        PORTS="21,23,25,80,443,445,3389,8080"
+        
+        # Check if CHAOS target is supported
+        if iptables -m chaos --help >/dev/null 2>&1; then
+            echo "[fuzz] Using xt_CHAOS kernel module (Tarpit/Delude)"
+            if ! iptables_exists -A INPUT -p tcp -m multiport --dports $PORTS -j CHAOS --tarpit; then
+                iptables -A INPUT -p tcp -m multiport --dports $PORTS -j CHAOS --tarpit
+            fi
+        else
+            echo "[fuzz] xt_CHAOS not found/loaded. Falling back to statistic-based fuzzing."
+            # Fallback: Statistic Based
+            if ! iptables_exists -A INPUT -p tcp -m multiport --dports $PORTS -m statistic --mode random --probability 0.33 -j DROP; then
+                iptables -A INPUT -p tcp -m multiport --dports $PORTS -m statistic --mode random --probability 0.33 -j DROP
+            fi
+            if ! iptables_exists -A INPUT -p tcp -m multiport --dports $PORTS -m statistic --mode random --probability 0.5 -j REJECT --reject-with tcp-reset; then
+                iptables -A INPUT -p tcp -m multiport --dports $PORTS -m statistic --mode random --probability 0.5 -j REJECT --reject-with tcp-reset
+            fi
+            if ! iptables_exists -A INPUT -p tcp -m multiport --dports $PORTS -j REJECT --reject-with icmp-host-prohibited; then
+                 iptables -A INPUT -p tcp -m multiport --dports $PORTS -j REJECT --reject-with icmp-host-prohibited
+            fi
+        fi
+
+        echo "[shadowos] Network Fuzzing Active on ports: $PORTS"
         ;;
     rotate)
         # === POLYMORPHIC IDENTITY ROTATION ===
@@ -790,9 +1324,11 @@ EOF
         ;;
     daemon)
         echo "[polymorph] Starting Active Polymorphic Defense (Interval: 60s)..."
+        # Ensure fuzzer is running initially
+        $0 fuzz
+        
         while true; do
             $0 rotate
-            # Future: Add active port fuzzing/honeyports here
             sleep 60
         done
         ;;
@@ -840,16 +1376,17 @@ RestartSec=10
 WantedBy=multi-user.target
 POLYMORPH
     sudo chroot "$ROOTFS" systemctl enable shadow-polymorph.service 2>/dev/null || true
-fi
+fi # End config stage
 
-# Create RAM workspace
-sudo mkdir -p "$ROOTFS/shadow"
+if [[ "$STAGE" == "iso" || "$STAGE" == "all" ]]; then
+    # Create RAM workspace
+    sudo mkdir -p "$ROOTFS/shadow"
 
-log "ShadowOS components installed"
+    log "ShadowOS components installed"
 
-# Create shadowos-update script
-log "Creating shadowos-update script..."
-sudo tee "$ROOTFS/usr/bin/shadowos-update" > /dev/null << 'UPDATE'
+    # Create shadowos-update script
+    log "Creating shadowos-update script..."
+    sudo tee "$ROOTFS/usr/bin/shadowos-update" > /dev/null << 'UPDATE'
 #!/bin/bash
 # ShadowOS Update Script
 # Wraps apt update/upgrade and provides GitHub-based ShadowOS updates
@@ -905,60 +1442,60 @@ esac
 echo ""
 echo "[shadowos] Update complete."
 UPDATE
-sudo chmod +x "$ROOTFS/usr/bin/shadowos-update"
+    sudo chmod +x "$ROOTFS/usr/bin/shadowos-update"
 
-# Create apt update hook to show ShadowOS branding
-sudo mkdir -p "$ROOTFS/etc/apt/apt.conf.d"
-sudo tee "$ROOTFS/etc/apt/apt.conf.d/99shadowos" > /dev/null << 'APTHOOK'
+    # Create apt update hook to show ShadowOS branding
+    sudo mkdir -p "$ROOTFS/etc/apt/apt.conf.d"
+    sudo tee "$ROOTFS/etc/apt/apt.conf.d/99shadowos" > /dev/null << 'APTHOOK'
 // ShadowOS apt configuration
 APT::Update::Pre-Invoke { "echo '[ShadowOS] Starting package database update...'"; };
 APT::Update::Post-Invoke { "echo '[ShadowOS] Package database updated.'"; };
 APTHOOK
 
-# =============================================================================
-# GENERATE INITRAMFS
-# =============================================================================
+    # =============================================================================
+    # GENERATE INITRAMFS
+    # =============================================================================
 
-log "Generating initramfs..."
+    log "Generating initramfs..."
 
-# Mount for chroot
-sudo mount --bind /dev "$ROOTFS/dev" || true
-sudo mount --bind /dev/pts "$ROOTFS/dev/pts" || true
-sudo mount -t proc proc "$ROOTFS/proc" || true
-sudo mount -t sysfs sysfs "$ROOTFS/sys" || true
+    # Mount for chroot
+    sudo mount --bind /dev "$ROOTFS/dev" || true
+    sudo mount --bind /dev/pts "$ROOTFS/dev/pts" || true
+    sudo mount -t proc proc "$ROOTFS/proc" || true
+    sudo mount -t sysfs sysfs "$ROOTFS/sys" || true
 
-# Update initramfs with live-boot (Critical step)
-log "Regenerating initramfs..."
-sudo chroot "$ROOTFS" update-initramfs -u -k all || error "Failed to regenerate initramfs"
+    # Update initramfs with live-boot (Critical step)
+    log "Regenerating initramfs..."
+    sudo chroot "$ROOTFS" update-initramfs -u -k all || error "Failed to regenerate initramfs"
 
-# Copy kernel and initramfs to ISO
-KERNEL_VER=$(ls "$ROOTFS/lib/modules/" | sort -V | tail -1)
-if [[ -n "$KERNEL_VER" ]]; then
-    log "Using kernel $KERNEL_VER"
-    sudo cp "$ROOTFS/boot/vmlinuz-$KERNEL_VER" "$BUILD_DIR/iso/boot/vmlinuz"
-    sudo cp "$ROOTFS/boot/initrd.img-$KERNEL_VER" "$BUILD_DIR/iso/boot/initrd.img"
-else
-    error "No kernel found in rootfs"
-fi
+    # Copy kernel and initramfs to ISO
+    KERNEL_VER=$(ls "$ROOTFS/lib/modules/" | sort -V | tail -1)
+    if [[ -n "$KERNEL_VER" ]]; then
+        log "Using kernel $KERNEL_VER"
+        if [[ ! -d "$BUILD_DIR/iso/boot" ]]; then mkdir -p "$BUILD_DIR/iso/boot"; fi
+        sudo cp "$ROOTFS/boot/vmlinuz-$KERNEL_VER" "$BUILD_DIR/iso/boot/vmlinuz"
+        sudo cp "$ROOTFS/boot/initrd.img-$KERNEL_VER" "$BUILD_DIR/iso/boot/initrd.img"
+    else
+        error "No kernel found in rootfs"
+    fi
 
-# Unmount
-sudo umount "$ROOTFS/sys" 2>/dev/null || true
-sudo umount "$ROOTFS/proc" 2>/dev/null || true
-sudo umount "$ROOTFS/dev/pts" 2>/dev/null || true
-sudo umount "$ROOTFS/dev" 2>/dev/null || true
+    # Unmount
+    sudo umount "$ROOTFS/sys" 2>/dev/null || true
+    sudo umount "$ROOTFS/proc" 2>/dev/null || true
+    sudo umount "$ROOTFS/dev/pts" 2>/dev/null || true
+    sudo umount "$ROOTFS/dev" 2>/dev/null || true
 
-# =============================================================================
-# CREATE SQUASHFS
-# =============================================================================
+    # =============================================================================
+    # CREATE SQUASHFS
+    # =============================================================================
 
-log "Creating SquashFS (this takes a while)..."
+    log "Creating SquashFS (this takes a while)..."
 
-sudo rm -f "$BUILD_DIR/iso/live/filesystem.squashfs"
-sudo mksquashfs "$ROOTFS" "$BUILD_DIR/iso/live/filesystem.squashfs" \
-    -comp gzip -b 1M -noappend
+    sudo rm -f "$BUILD_DIR/iso/live/filesystem.squashfs"
+    sudo mksquashfs "$ROOTFS" "$BUILD_DIR/iso/live/filesystem.squashfs" \
+        -comp gzip -b 1M -noappend
 
-# Create live-boot metadata
-log "Creating live-boot metadata..."
+    log "Creating live-boot metadata..."
 echo "filesystem.squashfs" | sudo tee "$BUILD_DIR/iso/live/filesystem.module" > /dev/null
 sudo du -sb "$ROOTFS" | cut -f1 | sudo tee "$BUILD_DIR/iso/live/filesystem.size" > /dev/null
 
@@ -1107,3 +1644,4 @@ log ""
 log " Test with:"
 log "   qemu-system-x86_64 -m 4G -cdrom $OUTPUT -enable-kvm"
 log "=============================================="
+fi

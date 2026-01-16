@@ -29,11 +29,14 @@ echo "[shadowos] Running build in container..."
 # Run container
 # --privileged is required for mount/chroot operations inside
 # --rm removes container after exit
-# -v maps project root to /work
-docker run --rm -it \
-    --privileged \
-    -v "$PROJECT_ROOT:/work" \
-    "$IMAGE_NAME" \
-    ./scripts/build-iso.sh "$@"
+# Run the build inside the container
+docker run --rm --privileged \
+    -v "$(pwd):/app" \
+    -v "$(pwd)/output:/app/output" \
+    -e SHADOWOS_DIR=/app \
+    --user root \
+    -w /app \
+    shadowos-builder \
+    make -j$(nproc) iso "$@"
 
 echo "[shadowos] Container build finished."

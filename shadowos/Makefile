@@ -1,49 +1,54 @@
-# SPDX-License-Identifier: GPL-2.0
-#
-# Makefile for ShadowOS
-#
+# ShadowOS Makefile
+# Incremental build system to avoid redownloading packages
 
-obj-$(CONFIG_SHADOWOS) += shadowos/
+BUILD_DIR = /app/build
+ROOTFS = $(BUILD_DIR)/rootfs
+OUTPUT_DIR = output
+ISO_NAME = shadowos.iso
 
-# Installation targets
-SHADOWOS_DESTDIR ?= $(INSTALL_MOD_PATH)/shadowos
-SHADOWOS_SRC := $(srctree)/shadowos
+.PHONY: all clean rootfs packages config iso help
 
-.PHONY: shadowos-install shadowos-iso shadowos-usb shadowos-clean
+all: iso
 
-shadowos-install:
-	@echo "  INSTALL ShadowOS to $(SHADOWOS_DESTDIR)"
-	$(Q)mkdir -p $(SHADOWOS_DESTDIR)/usr/bin
-	$(Q)mkdir -p $(SHADOWOS_DESTDIR)/etc
-	$(Q)install -m 755 $(SHADOWOS_SRC)/usr/bin/* $(SHADOWOS_DESTDIR)/usr/bin/
-	$(Q)cp -r $(SHADOWOS_SRC)/etc/* $(SHADOWOS_DESTDIR)/etc/
-	@echo "  ShadowOS installed"
+help:
+	@echo "ShadowOS Build System"
+	@echo "  make rootfs    - Bootstrap Debian base (Cached)"
+	@echo "  make packages  - Install packages (Cached)"
+	@echo "  make config    - Apply configuration (Always runs)"
+	@echo "  make iso       - Generate ISO image"
+	@echo "  make clean     - Remove all build artifacts"
 
-shadowos-iso: vmlinux
-	@echo "  BUILD  ShadowOS ISO"
-	$(Q)$(SHADOWOS_SRC)/scripts/build-iso.sh \
-		--kernel $(objtree)/arch/$(SRCARCH)/boot/bzImage \
-		--output $(objtree)/shadowos.iso
-	@echo "  ISO    $(objtree)/shadowos.iso"
+$(BUILD_DIR):
+	mkdir -p $(BUILD_DIR)
 
-shadowos-usb:
-	@echo "  BUILD  ShadowOS USB"
-	@echo "  Usage: make shadowos-usb DEVICE=/dev/sdX"
-ifndef DEVICE
-	$(error DEVICE not set. Use: make shadowos-usb DEVICE=/dev/sdX)
-endif
-	$(Q)$(SHADOWOS_SRC)/scripts/create-usb.sh $(DEVICE)
+# 1. Base System (Debootstrap)
+# specific marker file to check if done
+$(BUILD_DIR)/.rootfs_done: 
+	@echo "[Makefile] Bootstrapping rootfs..."
+	BUILD_DIR=$(BUILD_DIR) ./scripts/build-iso.sh --stage-rootfs
+	touch $(BUILD_DIR)/.rootfs_done
 
-shadowos-clean:
-	@echo "  CLEAN  ShadowOS"
-	$(Q)rm -rf $(objtree)/shadowos.iso
-	$(Q)rm -rf $(objtree)/shadowos-build
+rootfs: $(BUILD_DIR)/.rootfs_done
 
-help-shadowos:
-	@echo  ''
-	@echo  'ShadowOS targets:'
-	@echo  '  shadowos-install  - Install ShadowOS to INSTALL_MOD_PATH'
-	@echo  '  shadowos-iso      - Build bootable ISO'
-	@echo  '  shadowos-usb      - Create USB (DEVICE=/dev/sdX required)'
-	@echo  '  shadowos-clean    - Clean ShadowOS build files'
-	@echo  ''
+# 2. Packages (Apt)
+# Depends on rootfs
+$(BUILD_DIR)/.packages_done: $(BUILD_DIR)/.rootfs_done
+	@echo "[Makefile] Installing packages..."
+	BUILD_DIR=$(BUILD_DIR) ./scripts/build-iso.sh --stage-packages
+	touch $(BUILD_DIR)/.packages_done
+
+packages: $(BUILD_DIR)/.packages_done
+
+# 3. Configuration (Copy files)
+# Always run to pick up script changes
+config: $(BUILD_DIR)/.packages_done
+	@echo "[Makefile] Applying configuration..."
+	BUILD_DIR=$(BUILD_DIR) ./scripts/build-iso.sh --stage-config
+
+# 4. ISO Generation
+iso: config
+	@echo "[Makefile] Generaling ISO..."
+	BUILD_DIR=$(BUILD_DIR) ./scripts/build-iso.sh --stage-iso
+
+clean:
+	rm -rf $(BUILD_DIR) $(OUTPUT_DIR)/$(ISO_NAME)
