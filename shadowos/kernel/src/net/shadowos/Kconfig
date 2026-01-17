@@ -70,6 +70,41 @@ config SHADOWOS_FPRINT
 	  JA3/JA4/HASSH fingerprinting for TLS and SSH connections.
 	  Useful for threat intelligence and connection profiling.
 
+config SHADOWOS_INJECT
+	tristate "Packet Injection"
+	depends on SHADOWOS_CORE
+	default m
+	help
+	  Kernel-level raw packet injection and crafting.
+
+config SHADOWOS_PROMISC
+	tristate "Promiscuous Mode Hiding"
+	depends on SHADOWOS_CORE
+	default m
+	help
+	  Hide promiscuous mode from detection tools.
+
+config SHADOWOS_DECOY
+	tristate "Decoy Network"
+	depends on SHADOWOS_CORE
+	default m
+	help
+	  Project phantom hosts on local network.
+
+config SHADOWOS_MTD
+	tristate "Moving Target Defense"
+	depends on SHADOWOS_CORE
+	default m
+	help
+	  Dynamic port hopping for services.
+
+config SHADOWOS_FRUSTRATE
+	tristate "Frustration Engine"
+	depends on SHADOWOS_CORE
+	default m
+	help
+	  Progressive delays for repeat attackers.
+
 endif # SHADOWOS
 
 endmenu

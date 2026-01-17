@@ -54,4 +54,28 @@ config SHADOWOS_META
 	  Automatic file metadata scrubbing (timestamps, EXIF, etc).
 	  Anti-forensic file sanitization.
 
+config SHADOWOS_HONEY
+	bool "Honeytokens"
+	default y
+	help
+	  Decoy files that alert when accessed.
+
+config SHADOWOS_INFINITE
+	bool "Infinite Depth Illusion"
+	default m
+	help
+	  Fake endless filesystems to waste attacker time.
+
+config SHADOWOS_DEADMAN
+	bool "Dead Man's Switch"
+	default m
+	help
+	  Require periodic check-ins or trigger action.
+
+config SHADOWOS_TIMELOCK
+	bool "Time-Locked Secrets"
+	default m
+	help
+	  Data accessible only at certain times.
+
 endif # SHADOWOS_SECURITY

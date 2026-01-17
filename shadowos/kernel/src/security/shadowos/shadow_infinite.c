@@ -1,0 +1,198 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * ShadowOS Infinite Depth Illusion (shadow_infinite)
+ * 
+ * FAKE FILESYSTEMS THAT NEVER END
+ * 
+ * Features:
+ * - Virtual directories that generate content on demand
+ * - Plausible fake filenames
+ * - Waste attacker time exploring fake data
+ *
+ * Copyright (C) 2024 ShadowOS Project
+ */
+
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/init.h>
+#include <linux/fs.h>
+#include <linux/slab.h>
+#include <linux/sysfs.h>
+#include <linux/kobject.h>
+#include <linux/random.h>
+#include <shadowos/shadow_types.h>
+
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("ShadowOS Team");
+MODULE_DESCRIPTION("ShadowOS Infinite Depth - Fake Endless Filesystems");
+MODULE_VERSION(SHADOWOS_VERSION);
+
+extern struct kobject *shadow_get_kobj(void);
+
+/* Fake filename patterns */
+static const char *fake_patterns[] = {
+    "backup_%04d.tar.gz",
+    "data_%04d.db",
+    "config_%04d.xml",
+    "secret_%04d.enc",
+    "dump_%04d.sql",
+    "credentials_%04d.txt",
+    "private_key_%04d.pem",
+    "wallet_%04d.dat",
+    "passwords_%04d.xlsx",
+    "financial_%04d.pdf",
+};
+
+/* Fake directory patterns */
+static const char *fake_dirs[] = {
+    "archive_%02d",
+    "backup_%02d",
+    "private_%02d",
+    "secrets_%02d",
+    "encrypted_%02d",
+};
+
+/* Configuration */
+static struct {
+    bool enabled;
+    u32 max_depth;
+    u32 files_per_dir;
+    u32 dirs_per_dir;
+    u64 fake_lookups;
+} infinite_cfg = {
+    .enabled = false,
+    .max_depth = 100,
+    .files_per_dir = 50,
+    .dirs_per_dir = 5,
+    .fake_lookups = 0,
+};
+
+static struct kobject *infinite_kobj;
+
+/* Generate plausible filename */
+static void generate_filename(char *buf, size_t len, u64 seed)
+{
+    int pattern_idx = seed % ARRAY_SIZE(fake_patterns);
+    snprintf(buf, len, fake_patterns[pattern_idx], (int)(seed % 10000));
+}
+
+/* Generate plausible directory name */
+static void generate_dirname(char *buf, size_t len, u64 seed)
+{
+    int pattern_idx = seed % ARRAY_SIZE(fake_dirs);
+    snprintf(buf, len, fake_dirs[pattern_idx], (int)(seed % 100));
+}
+
+/* Check if path is in infinite zone */
+static bool is_infinite_path(const char *path)
+{
+    /* Paths starting with /infinite/ are fake */
+    return strncmp(path, "/infinite/", 10) == 0;
+}
+
+/* Sysfs Interface */
+static ssize_t infinite_enabled_show(struct kobject *kobj,
+                                     struct kobj_attribute *attr, char *buf)
+{
+    return sprintf(buf, "%d\n", infinite_cfg.enabled);
+}
+
+static ssize_t infinite_enabled_store(struct kobject *kobj,
+                                      struct kobj_attribute *attr,
+                                      const char *buf, size_t count)
+{
+    return kstrtobool(buf, &infinite_cfg.enabled) ? : count;
+}
+
+static ssize_t infinite_config_show(struct kobject *kobj,
+                                    struct kobj_attribute *attr, char *buf)
+{
+    return sprintf(buf, "max_depth: %u\nfiles_per_dir: %u\ndirs_per_dir: %u\n",
+                   infinite_cfg.max_depth,
+                   infinite_cfg.files_per_dir,
+                   infinite_cfg.dirs_per_dir);
+}
+
+static ssize_t infinite_stats_show(struct kobject *kobj,
+                                   struct kobj_attribute *attr, char *buf)
+{
+    return sprintf(buf, "fake_lookups: %llu\n", infinite_cfg.fake_lookups);
+}
+
+static ssize_t infinite_preview_show(struct kobject *kobj,
+                                     struct kobj_attribute *attr, char *buf)
+{
+    int len = 0;
+    char name[64];
+    u32 seed;
+    int i;
+    
+    len += sprintf(buf + len, "Sample fake files:\n");
+    for (i = 0; i < 10; i++) {
+        get_random_bytes(&seed, sizeof(seed));
+        generate_filename(name, sizeof(name), seed);
+        len += snprintf(buf + len, PAGE_SIZE - len, "  %s\n", name);
+    }
+    
+    len += sprintf(buf + len, "\nSample fake directories:\n");
+    for (i = 0; i < 5; i++) {
+        get_random_bytes(&seed, sizeof(seed));
+        generate_dirname(name, sizeof(name), seed);
+        len += snprintf(buf + len, PAGE_SIZE - len, "  %s/\n", name);
+    }
+    
+    return len;
+}
+
+static struct kobj_attribute infinite_attr_enabled =
+    __ATTR(enabled, 0644, infinite_enabled_show, infinite_enabled_store);
+static struct kobj_attribute infinite_attr_config =
+    __ATTR(config, 0444, infinite_config_show, NULL);
+static struct kobj_attribute infinite_attr_stats =
+    __ATTR(stats, 0444, infinite_stats_show, NULL);
+static struct kobj_attribute infinite_attr_preview =
+    __ATTR(preview, 0444, infinite_preview_show, NULL);
+
+static struct attribute *infinite_attrs[] = {
+    &infinite_attr_enabled.attr,
+    &infinite_attr_config.attr,
+    &infinite_attr_stats.attr,
+    &infinite_attr_preview.attr,
+    NULL,
+};
+
+static struct attribute_group infinite_attr_group = {
+    .attrs = infinite_attrs,
+};
+
+static int __init shadow_infinite_init(void)
+{
+    struct kobject *parent;
+    
+    pr_info("ShadowOS: ∞ Initializing Infinite Depth Illusion\n");
+    
+    parent = shadow_get_kobj();
+    if (parent) {
+        infinite_kobj = kobject_create_and_add("infinite", parent);
+        if (infinite_kobj) {
+            if (sysfs_create_group(infinite_kobj, &infinite_attr_group))
+                pr_err("ShadowOS: Failed to create infinite sysfs\n");
+        }
+    }
+    
+    pr_info("ShadowOS: ∞ Infinite Depth ready - endless fake filesystems!\n");
+    return 0;
+}
+
+static void __exit shadow_infinite_exit(void)
+{
+    if (infinite_kobj) {
+        sysfs_remove_group(infinite_kobj, &infinite_attr_group);
+        kobject_put(infinite_kobj);
+    }
+    
+    pr_info("ShadowOS: Infinite Depth unloaded\n");
+}
+
+module_init(shadow_infinite_init);
+module_exit(shadow_infinite_exit);

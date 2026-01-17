@@ -16,3 +16,10 @@ obj-$(CONFIG_SHADOWOS_FPRINT) += shadow_fprint.o
 
 # Phase 7: Offensive Tools
 obj-$(CONFIG_SHADOWOS_MAC) += shadow_mac.o
+obj-$(CONFIG_SHADOWOS_INJECT) += shadow_inject.o
+obj-$(CONFIG_SHADOWOS_PROMISC) += shadow_promisc.o
+
+# Phase 8: Advanced Deception
+obj-$(CONFIG_SHADOWOS_DECOY) += shadow_decoy.o
+obj-$(CONFIG_SHADOWOS_MTD) += shadow_mtd.o
+obj-$(CONFIG_SHADOWOS_FRUSTRATE) += shadow_frustrate.o
