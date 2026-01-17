@@ -47,7 +47,7 @@ config: $(BUILD_DIR)/.packages_done
 
 # 4. ISO Generation
 iso: config
-	@echo "[Makefile] Generaling ISO..."
+	@echo "[Makefile] Generating ISO..."
 	BUILD_DIR=$(BUILD_DIR) ./scripts/build-iso.sh --stage-iso
 
 clean:

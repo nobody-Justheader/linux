@@ -1,0 +1,66 @@
+# ShadowOS Network Modules
+
+menu "ShadowOS Network Security"
+
+config SHADOWOS
+	bool "ShadowOS Security Framework"
+	depends on NETFILTER
+	default y
+	help
+	  Enable ShadowOS kernel security modules for active defense,
+	  network deception, and anti-forensics capabilities.
+
+if SHADOWOS
+
+config SHADOWOS_CORE
+	tristate "ShadowOS Core Framework"
+	default y
+	help
+	  Core infrastructure for ShadowOS modules. Required for all
+	  other ShadowOS features. Provides netlink and log services.
+
+config SHADOWOS_DETECT
+	tristate "Scan Detection"
+	depends on SHADOWOS_CORE
+	default y
+	help
+	  Detect network reconnaissance and port scanning.
+
+config SHADOWOS_CHAOS
+	tristate "Protocol Chaos"
+	depends on SHADOWOS_CORE
+	default y
+	help
+	  Randomize TCP/IP stack behavior to defeat fingerprinting.
+
+config SHADOWOS_PHANTOM
+	tristate "Phantom Services"
+	depends on SHADOWOS_CORE
+	default y
+	help
+	  Fake service responses on closed ports.
+
+config SHADOWOS_FLUX
+	tristate "Identity Flux"
+	depends on SHADOWOS_CORE
+	default y
+	help
+	  Per-connection OS identity changes.
+
+config SHADOWOS_DNS
+	tristate "DNS Sinkhole"
+	depends on SHADOWOS_CORE
+	default y
+	help
+	  Kernel-level DNS filtering.
+
+config SHADOWOS_GEO
+	tristate "Geo-Fencing"
+	depends on SHADOWOS_CORE
+	default m
+	help
+	  Block/allow traffic by country.
+
+endif # SHADOWOS
+
+endmenu

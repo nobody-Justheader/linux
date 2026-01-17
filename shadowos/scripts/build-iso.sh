@@ -224,8 +224,6 @@ EOF
 
     # Create Kali setup script (run post-install to enable Kali repos)
     log "Creating Kali repository setup script..."
-    id
-    ls -ld "$ROOTFS/usr/bin"
     cat > "$ROOTFS/usr/bin/shadowos-kali-setup" << 'KALISETUP'
 #!/bin/bash
 # ShadowOS - Enable Kali Repositories
@@ -288,17 +286,6 @@ if [[ "$STAGE" == "packages" || "$STAGE" == "all" ]]; then
     # INSTALL ADDITIONAL PACKAGES
     # =============================================================================
 
-
-    # Add VSCodium Repository (Code-OSS) (Requires gnupg)
-    if ! command -v gpg &> /dev/null; then
-        log "Installing gnupg..."
-        apt-get update && apt-get install -y gnupg
-    fi
-
-    log "Adding VSCodium repo..."
-    curl -fsSL https://gitlab.com/paulcarroty/vscodium-deb-rpm-repo/raw/master/pub.gpg | gpg --batch --yes --dearmor -o "$ROOTFS/usr/share/keyrings/vscodium-archive-keyring.gpg"
-    echo 'deb [signed-by=/usr/share/keyrings/vscodium-archive-keyring.gpg] https://download.vscodium.com/debs vscodium main' | tee "$ROOTFS/etc/apt/sources.list.d/vscodium.list"
-
     log "Installing additional packages..."
 
     # Mount required filesystems for chroot
@@ -311,36 +298,58 @@ if [[ "$STAGE" == "packages" || "$STAGE" == "all" ]]; then
     echo "exit 101" | sudo tee "$ROOTFS/usr/sbin/policy-rc.d" > /dev/null
     sudo chmod +x "$ROOTFS/usr/sbin/policy-rc.d"
 
-    # Install GUI and tools
+    # First install ca-certificates and gnupg (needed for repo setup)
     sudo chroot "$ROOTFS" apt-get update
-    # Install packages (split into groups to avoid total failure)
-    # 1. Core GUI & Drivers (XFCE + LightDM)
+    sudo chroot "$ROOTFS" apt-get install -y ca-certificates gnupg curl wget
+
+    # Now add VSCodium Repository (requires ca-certificates)
+    log "Adding VSCodium repo..."
+    curl -fsSL https://gitlab.com/paulcarroty/vscodium-deb-rpm-repo/raw/master/pub.gpg | \
+        sudo tee "$ROOTFS/usr/share/keyrings/vscodium-archive-keyring.gpg.asc" > /dev/null
+    sudo chroot "$ROOTFS" gpg --batch --yes --dearmor -o /usr/share/keyrings/vscodium-archive-keyring.gpg /usr/share/keyrings/vscodium-archive-keyring.gpg.asc
+    echo 'deb [signed-by=/usr/share/keyrings/vscodium-archive-keyring.gpg] https://download.vscodium.com/debs vscodium main' | \
+        sudo tee "$ROOTFS/etc/apt/sources.list.d/vscodium.list" > /dev/null
+
+    # Update with new repo
+    sudo chroot "$ROOTFS" apt-get update
+
+    # Install GUI and tools (MATE Desktop + LightDM + Kali-style themes)
+    # MATE is more reliable than XFCE for panel configuration
+    log "Installing MATE desktop and tools..."
     sudo chroot "$ROOTFS" apt-get install -y --no-install-recommends \
-        xfce4 xfce4-goodies \
-        lightdm lightdm-gtk-greeter \
-        firefox-esr thunar \
+        mate-desktop-environment-core \
+        mate-desktop-environment-extras \
+        mate-tweak \
+        lightdm lightdm-gtk-greeter lightdm-gtk-greeter-settings \
+        firefox-esr caja caja-open-terminal \
         xorg xinit \
         dbus-x11 \
         network-manager-gnome \
         xserver-xorg-video-vmware xserver-xorg-video-qxl xserver-xorg-video-all \
         pciutils usbutils \
         firmware-linux firmware-linux-nonfree firmware-misc-nonfree firmware-realtek \
-        git gnupg ca-certificates curl wget \
-        xfce4-whiskermenu-plugin menulibre \
+        git \
+        pluma atril engrampa eom \
+        arc-theme papirus-icon-theme \
         xtables-addons-dkms xtables-addons-common linux-headers-amd64 dkms \
-        terminator codium zsh zsh-syntax-highlighting zsh-autosuggestions \
+        mate-terminal zsh zsh-syntax-highlighting zsh-autosuggestions \
         tor torsocks \
         python3-gi python3-gi-cairo gir1.2-gtk-3.0 python3-psutil \
         calamares calamares-settings-debian \
         live-boot live-config live-config-systemd \
         || error "GUI Package installation failed!"
 
+    # Install VSCodium separately (from external repo)
+    log "Installing VSCodium..."
+    sudo chroot "$ROOTFS" apt-get install -y codium || log "Warning: VSCodium install failed, continuing..."
+
     # (Redundant package installation block removed)
 
-    # Configure XFCE Autostart (nm-applet, etc.)
-    # XFCE handles most things automatically, just ensure nm-applet starts
-    sudo mkdir -p "$ROOTFS/home/shadow/.config/autostart"
-    sudo tee "$ROOTFS/home/shadow/.config/autostart/nm-applet.desktop" > /dev/null << 'NMAPPLET'
+    # Configure XFCE Autostart in SKEL (so useradd copies to user's home)
+    # NOTE: All user configs go to /etc/skel first, NOT /home/shadow directly
+    log "Setting up skeleton directory for new users..."
+    sudo mkdir -p "$ROOTFS/etc/skel/.config/autostart"
+    sudo tee "$ROOTFS/etc/skel/.config/autostart/nm-applet.desktop" > /dev/null << 'NMAPPLET'
 [Desktop Entry]
 Type=Application
 Name=Network Manager Applet
@@ -349,12 +358,12 @@ Hidden=false
 X-GNOME-Autostart-enabled=true
 NMAPPLET
 
-    # Create wallpaper setup autostart (ensures wallpaper is set at login)
-    sudo tee "$ROOTFS/home/shadow/.config/autostart/shadowos-wallpaper.desktop" > /dev/null << 'WALLPAPER'
+    # Create wallpaper setup autostart (MATE uses gsettings)
+    sudo tee "$ROOTFS/etc/skel/.config/autostart/shadowos-wallpaper.desktop" > /dev/null << 'WALLPAPER'
 [Desktop Entry]
 Type=Application
 Name=ShadowOS Wallpaper
-Exec=/bin/bash -c "sleep 2 && xfconf-query -c xfce4-desktop -p /backdrop/screen0/monitorVirtual1/workspace0/last-image -s /usr/share/backgrounds/shadowos/wallpaper.png 2>/dev/null; xfconf-query -c xfce4-desktop -p /backdrop/screen0/monitor0/workspace0/last-image -s /usr/share/backgrounds/shadowos/wallpaper.png 2>/dev/null; true"
+Exec=/bin/bash -c "sleep 2 && gsettings set org.mate.background picture-filename '/usr/share/backgrounds/shadowos/wallpaper.png' 2>/dev/null; true"
 Hidden=false
 X-GNOME-Autostart-enabled=true
 WALLPAPER
@@ -364,15 +373,15 @@ WALLPAPER
     sudo chroot "$ROOTFS" sed -i 's|^SHELL=.*|SHELL=/bin/zsh|' /etc/default/useradd
     sudo chroot "$ROOTFS" sed -i 's|^DSHELL=.*|DSHELL=/bin/zsh|' /etc/adduser.conf
 
-    # Create .zshrc for shadow user
-    sudo tee "$ROOTFS/home/shadow/.zshrc" > /dev/null << 'ZSHRC'
+    # Create .zshrc in skel (will be copied to new users)
+    sudo tee "$ROOTFS/etc/skel/.zshrc" > /dev/null << 'ZSHRC'
 # ShadowOS .zshrc
 export PATH="$HOME/.local/bin:$PATH"
 
 # Enable Powerlevel10k-like simplified prompt
 autoload -Uz promptinit
 promptinit
-PROMPT='%F{red}┌──(%F{cyan}%n㉿%m%F{red})-[%F{white}%~%F{red}]
+PROMPT='%F{red}┌──(%F{cyan}%n@%m%F{red})-[%F{white}%~%F{red}]
 └─%F{red}$%f '
 
 # History
@@ -394,7 +403,6 @@ alias chaos-on='shadow-control-center --chaos-on'
 source /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh 2>/dev/null || true
 source /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh 2>/dev/null || true
 ZSHRC
-    sudo chown 1000:1000 "$ROOTFS/home/shadow/.zshrc"
 
     # Install ShadowOS branding
     log "Installing ShadowOS branding..."
@@ -403,117 +411,60 @@ ZSHRC
         sudo cp "$SHADOWOS_DIR/assets/wallpaper.png" "$ROOTFS/usr/share/backgrounds/shadowos/wallpaper.png"
     fi
 
-    # XFCE default wallpaper config (using monitor0 which is more universal)
-    sudo mkdir -p "$ROOTFS/home/shadow/.config/xfce4/xfconf/xfce-perchannel-xml"
-    sudo tee "$ROOTFS/home/shadow/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml" > /dev/null << 'XFCEDESK'
-<?xml version="1.0" encoding="UTF-8"?>
-<channel name="xfce4-desktop" version="1.0">
-  <property name="backdrop" type="empty">
-    <property name="screen0" type="empty">
-      <property name="monitor0" type="empty">
-        <property name="workspace0" type="empty">
-          <property name="last-image" type="string" value="/usr/share/backgrounds/shadowos/wallpaper.png"/>
-          <property name="image-style" type="int" value="5"/>
-        </property>
-      </property>
-      <property name="monitorVirtual1" type="empty">
-        <property name="workspace0" type="empty">
-          <property name="last-image" type="string" value="/usr/share/backgrounds/shadowos/wallpaper.png"/>
-          <property name="image-style" type="int" value="5"/>
-        </property>
-      </property>
-    </property>
-  </property>
-</channel>
-XFCEDESK
+    # MATE theme configuration - Arc-Dark with Papirus icons
+    # MATE uses dconf/gsettings, which is more reliable than XFCE's xfconf
+    log "Configuring MATE theme..."
+    
+    # Create dconf profile for system defaults
+    sudo mkdir -p "$ROOTFS/etc/dconf/profile"
+    sudo tee "$ROOTFS/etc/dconf/profile/user" > /dev/null << 'DCONFPROFILE'
+user-db:user
+system-db:local
+DCONFPROFILE
 
-    # Boot logo will be copied later to ISO directory (not rootfs)
-    # See GRUB configuration section
+    # Create system-wide MATE defaults
+    sudo mkdir -p "$ROOTFS/etc/dconf/db/local.d"
+    sudo tee "$ROOTFS/etc/dconf/db/local.d/00-shadowos" > /dev/null << 'DCONFMATE'
+# ShadowOS MATE Desktop Configuration
+# Arc-Dark theme with Papirus icons
 
-    # Configure XFCE theme - Arc-Dark with Papirus icons
-    log "Configuring XFCE modern theme..."
-    sudo mkdir -p "$ROOTFS/home/shadow/.config/xfce4/xfconf/xfce-perchannel-xml"
+[org/mate/desktop/interface]
+gtk-theme='Arc-Dark'
+icon-theme='Papirus-Dark'
+cursor-theme='Adwaita'
+font-name='DejaVu Sans 10'
 
-    # xsettings - GTK theme and icons
-    sudo tee "$ROOTFS/home/shadow/.config/xfce4/xfconf/xfce-perchannel-xml/xsettings.xml" > /dev/null << 'XSETTINGS'
-<?xml version="1.0" encoding="UTF-8"?>
-<channel name="xsettings" version="1.0">
-  <property name="Net" type="empty">
-    <property name="ThemeName" type="string" value="Arc-Dark"/>
-    <property name="IconThemeName" type="string" value="Papirus-Dark"/>
-  </property>
-  <property name="Gtk" type="empty">
-    <property name="CursorThemeName" type="string" value="Adwaita"/>
-    <property name="FontName" type="string" value="DejaVu Sans 10"/>
-  </property>
-</channel>
-XSETTINGS
+[org/mate/marco/general]
+theme='Arc-Dark'
+compositing-manager=true
 
-    # xfwm4 - Window manager with compositor
-    sudo tee "$ROOTFS/home/shadow/.config/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml" > /dev/null << 'XFWM4'
-<?xml version="1.0" encoding="UTF-8"?>
-<channel name="xfwm4" version="1.0">
-  <property name="general" type="empty">
-    <property name="theme" type="string" value="Arc-Dark"/>
-    <property name="use_compositing" type="bool" value="true"/>
-    <property name="frame_opacity" type="int" value="100"/>
-    <property name="inactive_opacity" type="int" value="90"/>
-    <property name="popup_opacity" type="int" value="100"/>
-    <property name="show_frame_shadow" type="bool" value="true"/>
-  </property>
-</channel>
-XFWM4
+[org/mate/desktop/background]
+picture-filename='/usr/share/backgrounds/shadowos/wallpaper.png'
+picture-options='zoom'
+primary-color='#1e1e2e'
+secondary-color='#1e1e2e'
 
-    # xfce4-panel - Modern dark panel with Whisker Menu
-    sudo tee "$ROOTFS/home/shadow/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml" > /dev/null << 'XFCEPANEL'
-<?xml version="1.0" encoding="UTF-8"?>
-<channel name="xfce4-panel" version="1.0">
-  <property name="configver" type="int" value="2"/>
-  <property name="panels" type="array">
-    <value type="int" value="1"/>
-  </property>
-  <property name="panel-1" type="empty">
-    <!-- p=12: Bottom Locked. mode=0: Horizontal. length=100%: Full Width -->
-    <property name="position" type="string" value="p=12;x=0;y=0"/>
-    <property name="position-locked" type="bool" value="true"/>
-    <property name="length" type="uint" value="100"/>
-    <property name="length-adjust" type="uint" value="1"/>
-    <property name="size" type="uint" value="32"/>
-    <property name="mode" type="uint" value="0"/>
-    <property name="nrows" type="uint" value="1"/>
-    <property name="plugin-ids" type="array">
-      <value type="int" value="1"/>
-      <value type="int" value="2"/>
-      <value type="int" value="3"/>
-      <value type="int" value="4"/>
-      <value type="int" value="5"/>
-      <value type="int" value="6"/>
-      <value type="int" value="7"/>
-    </property>
-    <property name="background-style" type="uint" value="1"/>
-    <property name="background-rgba" type="array">
-      <value type="double" value="0.12"/>
-      <value type="double" value="0.12"/>
-      <value type="double" value="0.15"/>
-      <value type="double" value="0.95"/>
-    </property>
-  </property>
-  <property name="plugins" type="empty">
-    <property name="plugin-1" type="string" value="whiskermenu"/>
-    <property name="plugin-2" type="string" value="separator">
-       <property name="style" type="uint" value="0"/>
-    </property>
-    <property name="plugin-3" type="string" value="tasklist">
-       <property name="grouping" type="bool" value="true"/>
-    </property>
-    <property name="plugin-5" type="string" value="pager"/>
-    <property name="plugin-6" type="string" value="systray">
-       <property name="show-frame" type="bool" value="false"/>
-    </property>
-    <property name="plugin-7" type="string" value="clock"/>
-  </property>
-</channel>
-XFCEPANEL
+[org/mate/panel/general]
+object-id-list=['menu-bar', 'window-list', 'notification-area', 'clock']
+toplevel-id-list=['top']
+
+[org/mate/panel/toplevels/top]
+expand=true
+orientation='bottom'
+size=28
+screen=0
+
+[org/mate/terminal/profiles/default]
+background-color='#1E1E2EFF'
+foreground-color='#CDD6F4FF'
+palette='#45475A:#F38BA8:#A6E3A1:#F9E2AF:#89B4FA:#F5C2E7:#94E2D5:#BAC2DE:#585B70:#F38BA8:#A6E3A1:#F9E2AF:#89B4FA:#F5C2E7:#94E2D5:#A6ADC8'
+use-theme-colors=false
+bold-color='#CDD6F4FF'
+DCONFMATE
+
+    # Compile dconf database
+    log "Compiling dconf database..."
+    sudo chroot "$ROOTFS" dconf update 2>/dev/null || true
 
     # Configure NetworkManager for Anonymity (MAC Randomization & Hostname)
     sudo tee "$ROOTFS/etc/NetworkManager/NetworkManager.conf" > /dev/null << 'NMCONF'
@@ -546,47 +497,80 @@ if [[ "$STAGE" == "config" || "$STAGE" == "all" ]]; then
     # CONFIGURATION
     # =============================================================================
 
-    # Force panel geometry script (fix for floating panel)
-    log "Creating panel fix script..."
-    sudo tee "$ROOTFS/usr/bin/shadowos-fix-panel" > /dev/null << 'FIXPANEL'
+    # MATE theme setup script (runs on first login to apply gsettings)
+    log "Creating MATE theme setup script..."
+    sudo tee "$ROOTFS/usr/bin/shadowos-theme-setup" > /dev/null << 'THEMESETUP'
 #!/bin/bash
-# Force XFCE panel to correct geometry
-sleep 3
-xfconf-query -c xfce4-panel -p /panels/panel-1/position-locked -n -t bool -s true
-xfconf-query -c xfce4-panel -p /panels/panel-1/length -n -t uint -s 100
-xfconf-query -c xfce4-panel -p /panels/panel-1/length-adjust -n -t uint -s 1
-xfconf-query -c xfce4-panel -p /panels/panel-1/size -n -t uint -s 32
-xfconf-query -c xfce4-panel -p /panels/panel-1/position -n -t string -s "p=12;x=0;y=0"
-xfconf-query -c xfce4-panel -p /panels/panel-1/mode -n -t uint -s 0
-FIXPANEL
-    sudo chmod +x "$ROOTFS/usr/bin/shadowos-fix-panel"
+# ShadowOS MATE Theme Setup
+# Applies Arc-Dark theme and Papirus icons on first login
 
-    # Autostart for panel fix
+MARKER="$HOME/.config/shadowos-theme-configured"
+
+if [ -f "$MARKER" ]; then
+    exit 0
+fi
+
+echo "[shadowos] Applying MATE theme configuration..."
+
+# Wait for MATE session to be ready
+sleep 3
+
+# Apply GTK theme
+gsettings set org.mate.interface gtk-theme 'Arc-Dark'
+gsettings set org.mate.interface icon-theme 'Papirus-Dark'
+gsettings set org.mate.interface cursor-theme 'Adwaita'
+gsettings set org.mate.interface font-name 'DejaVu Sans 10'
+
+# Apply Marco (window manager) theme
+gsettings set org.mate.Marco.general theme 'Arc-Dark'
+gsettings set org.mate.Marco.general compositing-manager true
+
+# Apply wallpaper
+gsettings set org.mate.background picture-filename '/usr/share/backgrounds/shadowos/wallpaper.png'
+gsettings set org.mate.background picture-options 'zoom'
+gsettings set org.mate.background primary-color '#1e1e2e'
+
+# Apply MATE terminal colors (Catppuccin-inspired)
+gsettings set org.mate.terminal.profile:/org/mate/terminal/profiles/default/ background-color '#1E1E2E'
+gsettings set org.mate.terminal.profile:/org/mate/terminal/profiles/default/ foreground-color '#CDD6F4'
+gsettings set org.mate.terminal.profile:/org/mate/terminal/profiles/default/ use-theme-colors false
+
+# Reset MATE panel to default layout (fixes blank panel on first boot)
+echo "[shadowos] Resetting MATE panel to default layout..."
+mate-panel --reset &
+sleep 2
+
+# Mark as configured
+mkdir -p "$(dirname "$MARKER")"
+touch "$MARKER"
+
+echo "[shadowos] MATE theme applied successfully!"
+THEMESETUP
+    sudo chmod +x "$ROOTFS/usr/bin/shadowos-theme-setup"
+
+    # Create Autostart Entry for the theme setup script
     sudo mkdir -p "$ROOTFS/etc/xdg/autostart"
-    sudo tee "$ROOTFS/etc/xdg/autostart/shadowos-fix-panel.desktop" > /dev/null << 'AUTOSTART'
+    sudo tee "$ROOTFS/etc/xdg/autostart/shadowos-theme-setup.desktop" > /dev/null << 'AUTOSTART'
 [Desktop Entry]
 Type=Application
-Name=Fix Panel Geometry
-Exec=/usr/bin/shadowos-fix-panel
+Name=ShadowOS Theme Setup
+Exec=/usr/bin/shadowos-theme-setup
 Terminal=false
 StartupNotify=false
 Hidden=false
+OnlyShowIn=MATE;
 AUTOSTART
 
-    # Set ownership
-
-    sudo chown -R 1000:1000 "$ROOTFS/home/shadow/.config"
-    sudo chown 1000:1000 "$ROOTFS/home/shadow/.zshrc"
-
-    # Configure LightDM to allow manual login (or auto if preferred, but manual requested)
-    # We ensure the greeter is set
+    # Configure LightDM to use MATE session
     sudo mkdir -p "$ROOTFS/etc/lightdm"
-    echo "[Seat:*]" | sudo tee "$ROOTFS/etc/lightdm/lightdm.conf" > /dev/null
-    echo "greeter-session=lightdm-gtk-greeter" | sudo tee -a "$ROOTFS/etc/lightdm/lightdm.conf" > /dev/null
-    echo "user-session=xfce" | sudo tee -a "$ROOTFS/etc/lightdm/lightdm.conf" > /dev/null
+    sudo tee "$ROOTFS/etc/lightdm/lightdm.conf" > /dev/null << 'LIGHTDM'
+[Seat:*]
+greeter-session=lightdm-gtk-greeter
+user-session=mate
+LIGHTDM
 
-    # Update .bash_profile (Optional now since LightDM handles login)
-    sudo tee "$ROOTFS/home/shadow/.bash_profile" > /dev/null << 'PROFILE'
+    # Create .bash_profile in skel (for non-zsh fallback)
+    sudo tee "$ROOTFS/etc/skel/.bash_profile" > /dev/null << 'PROFILE'
 # ShadowOS
 if [ -z "$DISPLAY" ] && [ "$(tty)" = "/dev/tty1" ]; then
     echo "Welcome to ShadowOS."
@@ -602,7 +586,6 @@ if [ -e /dev/ttyS0 ] && [ -w /dev/ttyS0 ]; then
     } > /dev/ttyS0 2>/dev/null
 fi
 PROFILE
-    sudo chown 1000:1000 "$ROOTFS/home/shadow/.bash_profile"
 
     log "Creating 'shadow' user (post-package install)..."
     # Create shadow user
@@ -918,7 +901,7 @@ def f_tor(enable):
         run_cmd("iptables -A OUTPUT -p udp --dport 53 -j DROP") # Allow redirected only
         
         # Configure Tor (Ensure TransPort/DNSPort are set)
-        if not os.path.exists("/etc/tor/torrc.d/shadowwc.conf"):
+        if not os.path.exists("/etc/tor/torrc.d/shadowos.conf"):
              with open("/etc/tor/torrc.d/shadowos.conf", "w") as f:
                  f.write("TransPort 0.0.0.0:9040\nDNSPort 0.0.0.0:5353\nAutomapHostsOnResolve 1\n")
         run_cmd("systemctl restart tor")
@@ -1120,10 +1103,133 @@ Name=Shadow Control Center
 Comment=Manage Active Defense and Anonymity
 Exec=sudo shadow-control-center
 Icon=security-high
-Categories=System;Settings;Security;
+Categories=ShadowOS;System;Security;
 Terminal=false
 DESKTOP
     sudo chmod +x "$ROOTFS/usr/share/applications/shadow-control.desktop"
+
+    # Create Desktop Entries for ShadowOS Utilities
+    log "Creating ShadowOS menu entries..."
+
+    # Create ShadowOS menu category
+    sudo mkdir -p "$ROOTFS/usr/share/desktop-directories"
+    sudo tee "$ROOTFS/usr/share/desktop-directories/shadowos.directory" > /dev/null << 'MENUDIR'
+[Desktop Entry]
+Version=1.0
+Type=Directory
+Name=ShadowOS
+Comment=ShadowOS Security Tools
+Icon=security-high
+MENUDIR
+
+    # Shadow Harden
+    sudo tee "$ROOTFS/usr/share/applications/shadow-harden.desktop" > /dev/null << 'HARDENDESK'
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Shadow Harden
+Comment=Security Hardening & Stealth Mode
+Exec=mate-terminal -e "sudo shadow-harden"
+Icon=security-high
+Categories=ShadowOS;System;Security;
+Terminal=false
+HARDENDESK
+
+    # Shadow Stealth
+    sudo tee "$ROOTFS/usr/share/applications/shadow-stealth.desktop" > /dev/null << 'STEALTHDESK'
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Shadow Stealth
+Comment=MAC & Hostname Spoofing
+Exec=mate-terminal -e "sudo shadow-stealth"
+Icon=network-wireless
+Categories=ShadowOS;Network;Security;
+Terminal=false
+STEALTHDESK
+
+    # Shadow Tor
+    sudo tee "$ROOTFS/usr/share/applications/shadow-tor.desktop" > /dev/null << 'TORDESK'
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Shadow Tor
+Comment=Tor Network Management
+Exec=mate-terminal -e "sudo shadow-tor"
+Icon=preferences-system-network
+Categories=ShadowOS;Network;Security;
+Terminal=false
+TORDESK
+
+    # Shadow Recon
+    sudo tee "$ROOTFS/usr/share/applications/shadow-recon.desktop" > /dev/null << 'RECONDESK'
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Shadow Recon
+Comment=Network Reconnaissance
+Exec=mate-terminal -e "shadow-recon"
+Icon=network-server
+Categories=ShadowOS;Network;Security;
+Terminal=false
+RECONDESK
+
+    # Shadow Scan
+    sudo tee "$ROOTFS/usr/share/applications/shadow-scan.desktop" > /dev/null << 'SCANDESK'
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Shadow Scan
+Comment=Network Scanner
+Exec=mate-terminal -e "shadow-scan"
+Icon=network-workgroup
+Categories=ShadowOS;Network;Security;
+Terminal=false
+SCANDESK
+
+    # Shadow WiFi
+    sudo tee "$ROOTFS/usr/share/applications/shadow-wifi.desktop" > /dev/null << 'WIFIDESK'
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Shadow WiFi
+Comment=WiFi Attack Tools
+Exec=mate-terminal -e "sudo shadow-wifi"
+Icon=network-wireless
+Categories=ShadowOS;Network;Security;
+Terminal=false
+WIFIDESK
+
+    # Shadow Toolkit
+    sudo tee "$ROOTFS/usr/share/applications/shadow-toolkit.desktop" > /dev/null << 'TOOLKITDESK'
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Shadow Toolkit
+Comment=Security Toolkit Manager
+Exec=mate-terminal -e "shadow-toolkit"
+Icon=applications-system
+Categories=ShadowOS;System;Security;
+Terminal=false
+TOOLKITDESK
+
+    # Secure Delete
+    sudo tee "$ROOTFS/usr/share/applications/sdelete.desktop" > /dev/null << 'SDELETEDESK'
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Secure Delete
+Comment=Anti-forensic File Deletion
+Exec=mate-terminal -e "sdelete --help"
+Icon=edit-delete
+Categories=ShadowOS;System;Security;
+Terminal=false
+SDELETEDESK
+
+    # Remove Debian branding from menu
+    log "Removing Debian branding..."
+    sudo rm -f "$ROOTFS/usr/share/applications/debian-*" 2>/dev/null || true
+    sudo rm -f "$ROOTFS/usr/share/desktop-directories/Debian*.directory" 2>/dev/null || true
     sudo tee "$ROOTFS/usr/bin/shadow-harden" > /dev/null << 'HARDEN'
 #!/bin/bash
 # ShadowOS Security Hardening & Network Deception

@@ -1,0 +1,50 @@
+# ShadowOS Security Modules Kconfig
+
+menuconfig SHADOWOS_SECURITY
+	bool "ShadowOS Security Modules"
+	depends on SHADOWOS
+	help
+	  Hardware and storage security modules for ShadowOS.
+
+if SHADOWOS_SECURITY
+
+config SHADOWOS_USB
+	bool "USB Firewall"
+	depends on USB
+	default y
+	help
+	  USB device firewall with whitelist/blacklist support.
+	  Blocks mass storage and BadUSB attacks.
+
+config SHADOWOS_AV
+	bool "Audio/Video Kill Switch"
+	default y
+	help
+	  Kernel-level camera and microphone kill switch.
+
+config SHADOWOS_SHRED
+	bool "Secure Shred"
+	default y
+	help
+	  Military-grade secure file deletion with multi-pass overwrite.
+
+config SHADOWOS_RAM
+	bool "RAM Security"
+	default y
+	help
+	  RAM scrubbing and cold boot attack protection.
+
+config SHADOWOS_PANIC
+	bool "Panic Button"
+	depends on INPUT
+	default y
+	help
+	  Emergency wipe triggered by key combination.
+
+config SHADOWOS_CLOAK
+	bool "Process Cloaking"
+	default y
+	help
+	  Hide processes from /proc and ps.
+
+endif # SHADOWOS_SECURITY

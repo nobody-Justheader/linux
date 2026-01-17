@@ -65,11 +65,11 @@ config SHADOWOS_HARDENING
 	    - Firewall defaults
 
 config SHADOWOS_DESKTOP
-	bool "Sway desktop environment"
+	bool "MATE desktop environment"
 	default y
 	help
-	  Include Sway Wayland compositor configuration
-	  with Tokyo Night theme.
+	  Include MATE desktop environment with LightDM,
+	  Arc-Dark theme, and Papirus-Dark icons.
 
 config SHADOWOS_KALI_TOOLS
 	bool "Kali tool integration"
