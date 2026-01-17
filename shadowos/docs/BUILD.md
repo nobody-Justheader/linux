@@ -55,9 +55,12 @@ qemu-system-x86_64 -m 4G -cdrom shadowos.iso -enable-kvm
 | Stage | Command | Description | Cached? |
 |-------|---------|-------------|---------|
 | rootfs | `make rootfs` | Bootstrap Debian base | Yes |
-| packages | `make packages` | Install XFCE, tools | Yes |
+| packages | `make packages` | Install MATE, tools | Yes |
 | config | `make config` | Apply ShadowOS configs | No |
 | iso | `make iso` | Generate ISO | No |
+
+> **Note:** The initramfs is generated using Debian's `live-boot` package via `update-initramfs`.
+> There is no custom BusyBox initramfs—this simplifies maintenance and improves debugging.
 
 ## Troubleshooting
 

@@ -180,6 +180,10 @@ static unsigned int shadow_detect_hook(void *priv,
             alert.timestamp = ktime_get_real_ns();
             strncpy(alert.scan_type, "SYN_SCAN", sizeof(alert.scan_type));
             
+            /* Log to dmesg for visibility */
+            pr_alert("ShadowOS: 🚨 SCAN DETECTED: %s from %pI4 targeting port %d\n",
+                     alert.scan_type, &src_ip, dest_port);
+            
             spin_unlock_irqrestore(&detect_lock, flags);
             shadow_send_alert(&alert);
             return NF_ACCEPT;

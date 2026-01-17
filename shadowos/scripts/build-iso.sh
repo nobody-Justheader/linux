@@ -1226,6 +1226,12 @@ Categories=ShadowOS;System;Security;
 Terminal=false
 SDELETEDESK
 
+    # Update desktop and icon caches (like Kali/modern distros)
+    log "Updating desktop and icon caches..."
+    sudo chroot "$ROOTFS" update-desktop-database /usr/share/applications 2>/dev/null || true
+    sudo chroot "$ROOTFS" gtk-update-icon-cache -f /usr/share/icons/hicolor 2>/dev/null || true
+    sudo chroot "$ROOTFS" gtk-update-icon-cache -f /usr/share/icons/Papirus-Dark 2>/dev/null || true
+
     # Remove Debian branding from menu
     log "Removing Debian branding..."
     sudo rm -f "$ROOTFS/usr/share/applications/debian-*" 2>/dev/null || true
@@ -1556,6 +1562,10 @@ UPDATE
 // ShadowOS apt configuration
 APT::Update::Pre-Invoke { "echo '[ShadowOS] Starting package database update...'"; };
 APT::Update::Post-Invoke { "echo '[ShadowOS] Package database updated.'"; };
+
+// Automatically refresh menu and icon caches after package installs (like Kali)
+DPkg::Post-Invoke { "if [ -x /usr/bin/update-desktop-database ]; then update-desktop-database -q /usr/share/applications 2>/dev/null || true; fi"; };
+DPkg::Post-Invoke { "if [ -x /usr/bin/gtk-update-icon-cache ]; then gtk-update-icon-cache -f -q /usr/share/icons/hicolor 2>/dev/null || true; fi"; };
 APTHOOK
 
     # =============================================================================

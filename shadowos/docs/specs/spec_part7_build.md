@@ -422,3 +422,18 @@ jobs:
           name: shadowos-iso
           path: shadowos.iso
 ```
+
+# FUTURE IMPROVEMENTS
+
+## Initramfs
+
+The current initramfs implementation is based on a minimal BusyBox environment. For better debugging and tool availability, this should be migrated.
+
+*   **Requirement:** Migrate initramfs from minimal Busybox to full Debian/Alpine environment.
+*   **Goal:** Ensure standard tools like `ip` (iproute2), `ifconfig` (net-tools), and `udev` are available during early boot and in the rescue shell.
+*   **Benefit:** Easier troubleshooting of network configuration, module loading, and boot failures.
+
+## Build Process
+
+*   **Reproducible Builds:** Ensure deterministic build output for security auditing.
+*   **SBOM Generation:** Automatically generate Software Bill of Materials for each ISO build.
