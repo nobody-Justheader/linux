@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Shadow Control Center
+GenericName=Security Control Panel
+Comment=ShadowOS Security Management
+Exec=python3 /usr/share/shadowos/shadow_control.py
+Icon=security-high
+Categories=System;Security;Settings;
+Keywords=security;defense;privacy;shadowos;
+StartupNotify=true
+Terminal=false
