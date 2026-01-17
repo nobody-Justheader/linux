@@ -11,3 +11,4 @@ obj-$(CONFIG_SHADOWOS_RAM) += shadow_ram.o
 # Phase 6: Anti-Forensics
 obj-$(CONFIG_SHADOWOS_PANIC) += shadow_panic.o
 obj-$(CONFIG_SHADOWOS_CLOAK) += shadow_cloak.o
+obj-$(CONFIG_SHADOWOS_META) += shadow_meta.o

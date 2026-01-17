@@ -12,6 +12,7 @@ obj-$(CONFIG_SHADOWOS_FLUX) += shadow_flux.o
 # Phase 3: Network Security
 obj-$(CONFIG_SHADOWOS_DNS) += shadow_dns.o
 obj-$(CONFIG_SHADOWOS_GEO) += shadow_geo.o
+obj-$(CONFIG_SHADOWOS_FPRINT) += shadow_fprint.o
 
 # Phase 7: Offensive Tools
 obj-$(CONFIG_SHADOWOS_MAC) += shadow_mac.o

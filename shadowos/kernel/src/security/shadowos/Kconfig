@@ -47,4 +47,11 @@ config SHADOWOS_CLOAK
 	help
 	  Hide processes from /proc and ps.
 
+config SHADOWOS_META
+	bool "Metadata Scrubbing"
+	default y
+	help
+	  Automatic file metadata scrubbing (timestamps, EXIF, etc).
+	  Anti-forensic file sanitization.
+
 endif # SHADOWOS_SECURITY

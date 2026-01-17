@@ -61,6 +61,15 @@ config SHADOWOS_GEO
 	help
 	  Block/allow traffic by country.
 
+config SHADOWOS_FPRINT
+	tristate "Connection Fingerprinting"
+	depends on SHADOWOS_CORE
+	depends on CRYPTO_MD5
+	default y
+	help
+	  JA3/JA4/HASSH fingerprinting for TLS and SSH connections.
+	  Useful for threat intelligence and connection profiling.
+
 endif # SHADOWOS
 
 endmenu
