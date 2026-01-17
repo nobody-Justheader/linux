@@ -22,6 +22,20 @@ config SHADOWOS_AV
 	help
 	  Kernel-level camera and microphone kill switch.
 
+config SHADOWOS_BT
+	bool "Bluetooth Control"
+	default y
+	help
+	  Bluetooth kill switch and connection control.
+
+config SHADOWOS_DMA
+	bool "DMA Attack Protection"
+	depends on PCI
+	default y
+	help
+	  Block Thunderbolt, FireWire, and other DMA attack vectors.
+	  Enforces IOMMU restrictions.
+
 config SHADOWOS_SHRED
 	bool "Secure Shred"
 	default y
@@ -60,6 +74,66 @@ config SHADOWOS_HONEY
 	help
 	  Decoy files that alert when accessed.
 
+config SHADOWOS_ROOTKIT
+	bool "Rootkit Detection"
+	default y
+	help
+	  Detect hidden kernel modules and function hooks.
+	  Kernel integrity monitoring.
+
+config SHADOWOS_BEACON
+	bool "Beacon Detection"
+	depends on NETFILTER
+	default m
+	help
+	  Detect C2 beacon patterns and periodic connections.
+	  Command and control communication detection.
+
+config SHADOWOS_EXFIL
+	bool "Exfiltration Detection"
+	depends on NETFILTER
+	default m
+	help
+	  Detect data exfiltration and DNS tunneling.
+	  Data leak prevention.
+
+config SHADOWOS_COLDBOOT
+	bool "Cold Boot Protection"
+	default y
+	help
+	  Memory wiping on shutdown/suspend to prevent cold boot attacks.
+	  Memory scrambling and encryption.
+
+config SHADOWOS_TAMPER
+	bool "Tamper Detection"
+	depends on DMI
+	default y
+	help
+	  Evil maid attack detection via hardware fingerprinting.
+	  BIOS/UEFI modification alerts.
+
+config SHADOWOS_SIGN
+	bool "Module Signing Verification"
+	default y
+	help
+	  Verify kernel module signatures and block unsigned modules.
+	  Certificate management.
+
+config SHADOWOS_DEFCON
+	bool "DEFCON Levels"
+	default y
+	help
+	  Security posture management with 5 threat levels.
+	  Auto-apply security settings based on threat level.
+
+config SHADOWOS_EVIDENCE
+	bool "Evidence Preservation"
+	depends on CRYPTO_SHA256
+	default m
+	help
+	  Tamper-resistant forensic logging with hash chain integrity.
+	  Chain of custody support.
+
 config SHADOWOS_INFINITE
 	bool "Infinite Depth Illusion"
 	default m
@@ -79,3 +153,4 @@ config SHADOWOS_TIMELOCK
 	  Data accessible only at certain times.
 
 endif # SHADOWOS_SECURITY
+

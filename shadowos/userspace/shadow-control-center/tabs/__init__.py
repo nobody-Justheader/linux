@@ -4,8 +4,8 @@ from .deception import DeceptionTab
 from .network import NetworkTab
 from .hardware import HardwareTab
 from .storage import StorageTab
-from .emergency import EmergencyTab
-from .monitor import MonitorTab
+from .privacy import PrivacyTab
+from .offensive import OffensiveTab
 
 __all__ = [
     'DefenseTab',
@@ -13,6 +13,7 @@ __all__ = [
     'NetworkTab',
     'HardwareTab',
     'StorageTab',
-    'EmergencyTab',
-    'MonitorTab',
+    'PrivacyTab',
+    'OffensiveTab',
 ]
+
