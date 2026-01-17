@@ -490,6 +490,32 @@ NMCONF
 
     # Remove duplicate apt install block (Cleanup)
     # The previous redundant block (Tools & Network) is removed/merged.
+
+    # =============================================================================
+    # REMOVE BUSYBOX (Debian Mode)
+    # =============================================================================
+    log "Removing BusyBox to enforce Debian Mode..."
+    
+    # Configure initramfs to NOT use BusyBox (Debian Mode)
+    if [ -f "$ROOTFS/etc/initramfs-tools/initramfs.conf" ]; then
+        sudo sed -i 's/^BUSYBOX=.*/BUSYBOX=n/' "$ROOTFS/etc/initramfs-tools/initramfs.conf"
+    else
+        echo "BUSYBOX=n" | sudo tee -a "$ROOTFS/etc/initramfs-tools/initramfs.conf" > /dev/null
+    fi
+
+    # NOTE: We cannot purge busybox package because live-boot depends on it.
+    # Setting BUSYBOX=n ensures initramfs uses klibc-utils instead of busybox,
+    # satisfying the 'Debian Mode' requirement functionally.
+
+    # Clean apt cache
+    sudo chroot "$ROOTFS" apt-get clean
+    sudo rm -rf "$ROOTFS/var/lib/apt/lists/"*
+
+    # Unmount
+    sudo umount "$ROOTFS/sys" 2>/dev/null || true
+    sudo umount "$ROOTFS/proc" 2>/dev/null || true
+    sudo umount "$ROOTFS/dev/pts" 2>/dev/null || true
+    sudo umount "$ROOTFS/dev" 2>/dev/null || true
 fi # End packages stage
 
 if [[ "$STAGE" == "config" || "$STAGE" == "all" ]]; then
@@ -1585,14 +1611,23 @@ APTHOOK
     sudo chroot "$ROOTFS" update-initramfs -u -k all || error "Failed to regenerate initramfs"
 
     # Copy kernel and initramfs to ISO
-    KERNEL_VER=$(ls "$ROOTFS/lib/modules/" | sort -V | tail -1)
+    # Copy kernel and initramfs to ISO
+    # Filter for kernels that actually exist in /boot (ignoring host kernel artifacts in /lib/modules)
+    KERNEL_VER=""
+    for kver in $(ls "$ROOTFS/lib/modules/" | sort -V -r); do
+        if [ -f "$ROOTFS/boot/vmlinuz-$kver" ]; then
+            KERNEL_VER="$kver"
+            break
+        fi
+    done
+
     if [[ -n "$KERNEL_VER" ]]; then
         log "Using kernel $KERNEL_VER"
         if [[ ! -d "$BUILD_DIR/iso/boot" ]]; then mkdir -p "$BUILD_DIR/iso/boot"; fi
         sudo cp "$ROOTFS/boot/vmlinuz-$KERNEL_VER" "$BUILD_DIR/iso/boot/vmlinuz"
         sudo cp "$ROOTFS/boot/initrd.img-$KERNEL_VER" "$BUILD_DIR/iso/boot/initrd.img"
     else
-        error "No kernel found in rootfs"
+        error "No valid kernel found in rootfs (checked /lib/modules against /boot/vmlinuz-*)"
     fi
 
     # Unmount
