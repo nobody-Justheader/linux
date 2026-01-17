@@ -1,2 +1,76 @@
+# Comprehensive .gitignore for ShadowOS
+
+# Build outputs
 build/
+output/
 *.iso
+
+# Compiled objects
+*.o
+*.ko
+*.mod
+*.mod.c
+*.mod.o
+*.a
+*.so
+*.so.*
+modules.order
+Module.symvers
+.tmp_versions/
+
+# Kernel build
+.config
+.config.old
+vmlinux*
+System.map
+Module.markers
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+.Python
+.pytest_cache/
+*.egg-info/
+dist/
+eggs/
+.eggs/
+
+# IDE/Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Logs
+*.log
+Debug/
+
+# Temporary
+*.tmp
+*.temp
+.cache/
+
+# Docker
+.docker/
+
+# Root filesystem (from builds)
+rootfs/
+
+# Package files
+*.deb
+*.rpm
+
+# ShadowOS Custom Build Artifacts
+shadowos-bleeding.iso
+shadowos.iso

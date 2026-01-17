@@ -186,3 +186,6 @@ sphinx_*/
 /rust-project.json
 *.iso
 *.iso
+build/
+output/
+shadowos/*.iso
