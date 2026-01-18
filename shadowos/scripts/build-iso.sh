@@ -523,6 +523,49 @@ if [[ "$STAGE" == "config" || "$STAGE" == "all" ]]; then
     # CONFIGURATION
     # =============================================================================
 
+    # =============================================================================
+    # PLYMOUTH THEME (Boot Logo)
+    # =============================================================================
+    log "Configuring Plymouth theme..."
+    
+    PLYMOUTH_DIR="$ROOTFS/usr/share/plymouth/themes/shadowos"
+    sudo mkdir -p "$PLYMOUTH_DIR"
+    
+    if [ -f "$SHADOWOS_DIR/assets/boot_logo.png" ]; then
+        sudo cp "$SHADOWOS_DIR/assets/boot_logo.png" "$PLYMOUTH_DIR/boot_logo.png"
+    fi
+
+    # Create .plymouth file
+    sudo tee "$PLYMOUTH_DIR/shadowos.plymouth" > /dev/null << 'PLYMOUTHCONF'
+[Plymouth Theme]
+Name=ShadowOS
+Description=ShadowOS Stealth Boot Theme
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/shadowos
+ScriptFile=/usr/share/plymouth/themes/shadowos/shadowos.script
+PLYMOUTHCONF
+
+    # Create .script file
+    sudo tee "$PLYMOUTH_DIR/shadowos.script" > /dev/null << 'PLYMOUTHSCRIPT'
+Window.SetBackgroundTopColor(0.0, 0.0, 0.0);
+Window.SetBackgroundBottomColor(0.0, 0.0, 0.0);
+
+logo.image = Image("boot_logo.png");
+logo.sprite = Sprite(logo.image);
+
+logo.sprite.SetX(Window.GetWidth() / 2 - logo.image.GetWidth() / 2);
+logo.sprite.SetY(Window.GetHeight() / 2 - logo.image.GetHeight() / 2);
+logo.sprite.SetZ(100);
+PLYMOUTHSCRIPT
+
+    # Set as default theme
+    # Note: We use chroot to run plymouth-set-default-theme
+    if [ -x "$ROOTFS/usr/sbin/plymouth-set-default-theme" ]; then
+        sudo chroot "$ROOTFS" plymouth-set-default-theme -R shadowos
+    fi
+
     # MATE theme setup script (runs on first login to apply gsettings)
     log "Creating MATE theme setup script..."
     sudo tee "$ROOTFS/usr/bin/shadowos-theme-setup" > /dev/null << 'THEMESETUP'
