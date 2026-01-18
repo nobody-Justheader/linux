@@ -157,7 +157,7 @@ static struct nf_hook_ops exfil_nfho = {
     .hook = exfil_hook,
     .pf = NFPROTO_IPV4,
     .hooknum = NF_INET_LOCAL_OUT,
-    .priority = NF_IP_PRI_FIRST + 1,
+    .priority = NF_IP_PRI_MANGLE + 1,
 };
 
 /* Sysfs Interface */

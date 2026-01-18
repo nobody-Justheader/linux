@@ -153,7 +153,7 @@ static struct nf_hook_ops frust_nf_ops = {
     .hook = frust_hook,
     .pf = NFPROTO_IPV4,
     .hooknum = NF_INET_LOCAL_IN,
-    .priority = NF_IP_PRI_FIRST + 10,
+    .priority = NF_IP_PRI_MANGLE + 10,
 };
 
 /* Sysfs Interface */

@@ -23,6 +23,7 @@
 #include <linux/udp.h>
 #include <linux/list.h>
 #include <linux/slab.h>
+#include <linux/ctype.h>
 #include <shadowos/shadow_types.h>
 
 MODULE_LICENSE("GPL");
@@ -279,7 +280,7 @@ static struct nf_hook_ops phish_nfho = {
     .hook = phish_hook,
     .pf = NFPROTO_IPV4,
     .hooknum = NF_INET_LOCAL_OUT,
-    .priority = NF_IP_PRI_FIRST,
+    .priority = NF_IP_PRI_MANGLE,
 };
 
 /* Sysfs Interface */

@@ -165,7 +165,7 @@ static struct nf_hook_ops proto_nfho = {
     .hook = proto_hook,
     .pf = NFPROTO_IPV4,
     .hooknum = NF_INET_LOCAL_OUT,
-    .priority = NF_IP_PRI_FIRST + 20,
+    .priority = NF_IP_PRI_MANGLE + 20,
 };
 
 /* Add rule: echo "80:allow" or "22:deny" > add_rule */

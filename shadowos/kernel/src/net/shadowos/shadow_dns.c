@@ -200,7 +200,7 @@ static struct nf_hook_ops dns_nf_ops[] = {
         .hook = dns_hook,
         .pf = NFPROTO_IPV4,
         .hooknum = NF_INET_LOCAL_OUT,
-        .priority = NF_IP_PRI_FIRST,
+        .priority = NF_IP_PRI_MANGLE,
     },
 };
 

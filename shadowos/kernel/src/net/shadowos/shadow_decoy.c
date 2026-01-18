@@ -25,6 +25,7 @@
 #include <linux/list.h>
 #include <linux/random.h>
 #include <linux/skbuff.h>
+#include <linux/inet.h>
 #include <shadowos/shadow_types.h>
 
 MODULE_LICENSE("GPL");
@@ -177,7 +178,7 @@ static struct nf_hook_ops decoy_arp_ops = {
     .hook = decoy_arp_hook,
     .pf = NFPROTO_ARP,
     .hooknum = NF_ARP_IN,
-    .priority = NF_IP_PRI_FIRST,
+    .priority = INT_MIN,
 };
 
 /* Sysfs Interface */

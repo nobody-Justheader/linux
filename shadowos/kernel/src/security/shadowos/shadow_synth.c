@@ -19,6 +19,7 @@
 #include <linux/kobject.h>
 #include <linux/random.h>
 #include <linux/slab.h>
+#include <linux/ctype.h>
 #include <shadowos/shadow_types.h>
 
 MODULE_LICENSE("GPL");

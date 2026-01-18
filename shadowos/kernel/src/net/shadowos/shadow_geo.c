@@ -209,13 +209,13 @@ static struct nf_hook_ops geo_nf_ops[] = {
         .hook = geo_hook_in,
         .pf = NFPROTO_IPV4,
         .hooknum = NF_INET_LOCAL_IN,
-        .priority = NF_IP_PRI_FIRST,
+        .priority = NF_IP_PRI_MANGLE,
     },
     {
         .hook = geo_hook_out,
         .pf = NFPROTO_IPV4,
         .hooknum = NF_INET_LOCAL_OUT,
-        .priority = NF_IP_PRI_FIRST,
+        .priority = NF_IP_PRI_MANGLE,
     },
 };
 

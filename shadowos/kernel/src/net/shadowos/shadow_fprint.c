@@ -310,13 +310,13 @@ static struct nf_hook_ops fprint_nf_ops[] = {
         .hook = fprint_hook,
         .pf = NFPROTO_IPV4,
         .hooknum = NF_INET_LOCAL_IN,
-        .priority = NF_IP_PRI_FIRST,
+        .priority = NF_IP_PRI_MANGLE,
     },
     {
         .hook = fprint_hook,
         .pf = NFPROTO_IPV4,
         .hooknum = NF_INET_LOCAL_OUT,
-        .priority = NF_IP_PRI_FIRST,
+        .priority = NF_IP_PRI_MANGLE,
     },
 };
 
