@@ -39,7 +39,7 @@ static struct {
     u64 unsigned_detected;
 } sign_cfg = {
     .enabled = true,
-    .enforce_signatures = true,
+    .enforce_signatures = false,
     .log_unsigned = true,
     .modules_verified = 0,
     .modules_blocked = 0,
