@@ -61,7 +61,7 @@ static struct kobject *mtd_kobj;
 static u16 get_random_port(struct mtd_service *svc)
 {
     u32 range = svc->port_range_end - svc->port_range_start;
-    return svc->port_range_start + (prandom_u32() % range);
+    return svc->port_range_start + (get_random_u32() % range);
 }
 
 /* Move service to new port */

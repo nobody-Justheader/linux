@@ -23,6 +23,8 @@
 #include <linux/sysfs.h>
 #include <linux/kobject.h>
 #include <net/ip.h>
+#include <net/route.h>
+#include <linux/inetdevice.h>
 #include <net/checksum.h>
 #include <shadowos/shadow_types.h>
 
@@ -127,7 +129,7 @@ int shadow_inject_tcp_rst(__be32 saddr, __be32 daddr,
     iph->ihl = 5;
     iph->tos = 0;
     iph->tot_len = htons(total_len);
-    iph->id = htons(prandom_u32() & 0xFFFF);
+    iph->id = htons(get_random_u32() & 0xFFFF);
     iph->frag_off = 0;
     iph->ttl = 64;
     iph->protocol = IPPROTO_TCP;
