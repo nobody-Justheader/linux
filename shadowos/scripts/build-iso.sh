@@ -1751,17 +1751,17 @@ if [ -f /boot/grub/shadowos-logo.png ]; then
 fi
 
 menuentry "ShadowOS Live" {
-    linux /boot/vmlinuz boot=live $QUIET_OPTS console=tty0 console=ttyS0,115200n8
+    linux /boot/vmlinuz boot=live components $QUIET_OPTS console=tty0 console=ttyS0,115200n8
     initrd /boot/initrd.img
 }
 
 menuentry "ShadowOS Live (Safe Graphics - nomodeset)" {
-    linux /boot/vmlinuz boot=live nomodeset $QUIET_OPTS console=tty0 console=ttyS0,115200n8
+    linux /boot/vmlinuz boot=live components nomodeset $QUIET_OPTS console=tty0 console=ttyS0,115200n8
     initrd /boot/initrd.img
 }
 
 menuentry "ShadowOS Live (Debug)" {
-    linux /boot/vmlinuz boot=live debug console=tty0 console=ttyS0,115200n8
+    linux /boot/vmlinuz boot=live components debug console=tty0 console=ttyS0,115200n8
     initrd /boot/initrd.img
 }
 EOF
