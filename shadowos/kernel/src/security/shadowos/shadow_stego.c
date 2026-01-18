@@ -10,7 +10,7 @@
  * - Integration with block device layer
  * - Decoy data generation
  *
- * Copyright (C) 2024 ShadowOS Project
+ * Copyright (C) 2026 ShadowOS Project
  */
 
 #include <linux/module.h>

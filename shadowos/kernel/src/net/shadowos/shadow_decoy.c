@@ -6,10 +6,10 @@
  * 
  * Features:
  * - Phantom hosts that respond to ARP
+ * - Automated ARP reply generation
  * - Configurable fake services per host
- * - Integrate with shadow_phantom for responses
  *
- * Copyright (C) 2024 ShadowOS Project
+ * Copyright (C) 2026 ShadowOS Project
  */
 
 #include <linux/module.h>
@@ -17,12 +17,14 @@
 #include <linux/init.h>
 #include <linux/netdevice.h>
 #include <linux/if_arp.h>
+#include <linux/if_ether.h>
 #include <linux/netfilter.h>
 #include <linux/netfilter_arp.h>
 #include <linux/sysfs.h>
 #include <linux/kobject.h>
 #include <linux/list.h>
 #include <linux/random.h>
+#include <linux/skbuff.h>
 #include <shadowos/shadow_types.h>
 
 MODULE_LICENSE("GPL");
@@ -72,6 +74,56 @@ static struct phantom_host *find_phantom_by_ip(__be32 ip)
     return NULL;
 }
 
+/* Send ARP reply for phantom host */
+static int send_arp_reply(struct net_device *dev, struct phantom_host *ph,
+                          __be32 target_ip, u8 *target_mac)
+{
+    struct sk_buff *skb;
+    struct arphdr *arp;
+    unsigned char *arp_ptr;
+    int hlen = dev->hard_header_len;
+    int arp_len = sizeof(struct arphdr) + 2 * (dev->addr_len + 4);
+    
+    skb = alloc_skb(hlen + arp_len + 32, GFP_ATOMIC);
+    if (!skb)
+        return -ENOMEM;
+    
+    skb_reserve(skb, hlen + 16);
+    skb_reset_network_header(skb);
+    
+    arp = (struct arphdr *)skb_put(skb, sizeof(struct arphdr));
+    arp->ar_hrd = htons(ARPHRD_ETHER);
+    arp->ar_pro = htons(ETH_P_IP);
+    arp->ar_hln = dev->addr_len;
+    arp->ar_pln = 4;
+    arp->ar_op = htons(ARPOP_REPLY);
+    
+    /* ARP payload */
+    arp_ptr = (unsigned char *)skb_put(skb, 2 * (dev->addr_len + 4));
+    
+    /* Sender: phantom MAC and IP */
+    memcpy(arp_ptr, ph->mac, dev->addr_len);
+    arp_ptr += dev->addr_len;
+    memcpy(arp_ptr, &ph->ip, 4);
+    arp_ptr += 4;
+    
+    /* Target: original requester */
+    memcpy(arp_ptr, target_mac, dev->addr_len);
+    arp_ptr += dev->addr_len;
+    memcpy(arp_ptr, &target_ip, 4);
+    
+    skb->dev = dev;
+    skb->protocol = htons(ETH_P_ARP);
+    
+    /* Add ethernet header */
+    if (dev_hard_header(skb, dev, ETH_P_ARP, target_mac, ph->mac, skb->len) < 0) {
+        kfree_skb(skb);
+        return -EINVAL;
+    }
+    
+    return dev_queue_xmit(skb);
+}
+
 /* ARP hook - respond for phantom hosts */
 static unsigned int decoy_arp_hook(void *priv,
                                    struct sk_buff *skb,
@@ -80,6 +132,7 @@ static unsigned int decoy_arp_hook(void *priv,
     struct arphdr *arp;
     unsigned char *arp_ptr;
     __be32 sip, tip;
+    u8 sha[ETH_ALEN];
     struct phantom_host *ph;
     
     if (!decoy_cfg.enabled)
@@ -93,21 +146,27 @@ static unsigned int decoy_arp_hook(void *priv,
     if (arp->ar_op != htons(ARPOP_REQUEST))
         return NF_ACCEPT;
     
-    /* Extract target IP */
+    if (arp->ar_hln != ETH_ALEN || arp->ar_pln != 4)
+        return NF_ACCEPT;
+    
+    /* Extract sender and target info */
     arp_ptr = (unsigned char *)(arp + 1);
-    arp_ptr += arp->ar_hln + 4;  /* Skip sender hardware + IP */
-    memcpy(&tip, arp_ptr + arp->ar_hln, 4);
-    memcpy(&sip, arp_ptr - 4 - arp->ar_hln, 4);
+    memcpy(sha, arp_ptr, ETH_ALEN);          /* Sender MAC */
+    arp_ptr += ETH_ALEN;
+    memcpy(&sip, arp_ptr, 4);                /* Sender IP */
+    arp_ptr += 4 + ETH_ALEN;                 /* Skip target MAC */
+    memcpy(&tip, arp_ptr, 4);                /* Target IP */
     
     spin_lock(&decoy_cfg.lock);
     ph = find_phantom_by_ip(tip);
-    if (ph) {
-        /* This is one of our phantom hosts */
-        ph->arp_responses++;
-        decoy_cfg.total_arp_responses++;
-        pr_debug("ShadowOS DECOY: ARP request for phantom %pI4 from %pI4\n",
-                &tip, &sip);
-        /* In a full implementation, we would craft and send an ARP reply here */
+    if (ph && skb->dev) {
+        /* Send ARP reply for our phantom host */
+        if (send_arp_reply(skb->dev, ph, sip, sha) == 0) {
+            ph->arp_responses++;
+            decoy_cfg.total_arp_responses++;
+            pr_info("ShadowOS DECOY: 🎭 ARP reply sent for phantom %pI4 -> %pI4\n",
+                    &tip, &sip);
+        }
     }
     spin_unlock(&decoy_cfg.lock);
     
@@ -170,7 +229,7 @@ static ssize_t decoy_add_store(struct kobject *kobj,
     list_add(&ph->list, &decoy_cfg.hosts);
     spin_unlock(&decoy_cfg.lock);
     
-    pr_info("ShadowOS DECOY: Added phantom host %pI4 (%pM)\n", &ip, ph->mac);
+    pr_info("ShadowOS DECOY: 🎭 Added phantom host %pI4 (%pM)\n", &ip, ph->mac);
     return count;
 }
 
@@ -256,7 +315,7 @@ static int __init shadow_decoy_init(void)
         }
     }
     
-    pr_info("ShadowOS: 🎭 Decoy Network ready - project phantom hosts!\n");
+    pr_info("ShadowOS: 🎭 Decoy Network ACTIVE - phantom hosts respond to ARP!\n");
     return 0;
 }
 

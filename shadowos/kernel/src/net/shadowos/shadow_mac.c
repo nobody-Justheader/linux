@@ -10,7 +10,7 @@
  * - OUI preservation option
  * - Per-interface control
  *
- * Copyright (C) 2024 ShadowOS Project
+ * Copyright (C) 2026 ShadowOS Project
  */
 
 #include <linux/module.h>

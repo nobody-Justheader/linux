@@ -10,7 +10,7 @@
  * - Identify known attack signatures
  * - Build attacker fingerprints
  *
- * Copyright (C) 2024 ShadowOS Project
+ * Copyright (C) 2026 ShadowOS Project
  */
 
 #include <linux/module.h>

@@ -13,7 +13,7 @@
  * Note: Full file content parsing requires userspace helpers.
  * This module focuses on filesystem-level metadata (timestamps).
  *
- * Copyright (C) 2024 ShadowOS Project
+ * Copyright (C) 2026 ShadowOS Project
  */
 
 #include <linux/module.h>

@@ -10,7 +10,7 @@
  * - Hidden volume support notification
  * - Integration with dm-crypt
  *
- * Copyright (C) 2024 ShadowOS Project
+ * Copyright (C) 2026 ShadowOS Project
  */
 
 #include <linux/module.h>

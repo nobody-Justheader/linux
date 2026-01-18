@@ -9,7 +9,7 @@
  * - Configurable paths and access types (read, stat, open)
  * - Full accessor logging (PID, UID, command, parent)
  *
- * Copyright (C) 2024 ShadowOS Project
+ * Copyright (C) 2026 ShadowOS Project
  */
 
 #include <linux/module.h>

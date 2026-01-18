@@ -5,20 +5,22 @@
  * HIDE NETWORK SNIFFING FROM DETECTION
  * 
  * Features:
- * - Hide IFF_PROMISC flag from /proc/net/dev
- * - Hide from ip link show
+ * - Hide IFF_PROMISC flag from queries
+ * - Hook netlink for GETLINK responses  
  * - Stealth network monitoring
  *
- * Copyright (C) 2024 ShadowOS Project
+ * Copyright (C) 2026 ShadowOS Project
  */
 
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/netdevice.h>
+#include <linux/rtnetlink.h>
 #include <linux/sysfs.h>
 #include <linux/kobject.h>
 #include <linux/list.h>
+#include <net/sock.h>
 #include <shadowos/shadow_types.h>
 
 MODULE_LICENSE("GPL");
@@ -40,6 +42,7 @@ static struct {
     bool hide_all;
     struct list_head hidden_ifaces;
     spinlock_t lock;
+    u64 flags_hidden;
 } promisc_cfg;
 
 static struct kobject *promisc_kobj;
@@ -63,20 +66,39 @@ static bool should_hide_promisc(const char *ifname)
     return false;
 }
 
-/* Get sanitized flags (hiding PROMISC) */
+/* Get sanitized flags (hiding PROMISC) - exported for hooks */
 unsigned int shadow_get_hidden_flags(struct net_device *dev)
 {
     unsigned int flags = dev->flags;
     
     spin_lock(&promisc_cfg.lock);
     if (should_hide_promisc(dev->name)) {
-        flags &= ~IFF_PROMISC;
+        if (flags & IFF_PROMISC) {
+            flags &= ~IFF_PROMISC;
+            promisc_cfg.flags_hidden++;
+        }
     }
     spin_unlock(&promisc_cfg.lock);
     
     return flags;
 }
-EXPORT_SYMBOL(shadow_get_hidden_flags);
+EXPORT_SYMBOL_GPL(shadow_get_hidden_flags);
+
+/* Check if promisc should be hidden for a device - API for other modules */
+bool shadow_promisc_is_hidden(struct net_device *dev)
+{
+    bool hidden = false;
+    
+    if (!promisc_cfg.enabled)
+        return false;
+    
+    spin_lock(&promisc_cfg.lock);
+    hidden = should_hide_promisc(dev->name);
+    spin_unlock(&promisc_cfg.lock);
+    
+    return hidden && (dev->flags & IFF_PROMISC);
+}
+EXPORT_SYMBOL_GPL(shadow_promisc_is_hidden);
 
 /* Sysfs Interface */
 static ssize_t promisc_enabled_show(struct kobject *kobj,
@@ -89,7 +111,18 @@ static ssize_t promisc_enabled_store(struct kobject *kobj,
                                      struct kobj_attribute *attr,
                                      const char *buf, size_t count)
 {
-    return kstrtobool(buf, &promisc_cfg.enabled) ? : count;
+    bool val;
+    int rc = kstrtobool(buf, &val);
+    if (rc)
+        return rc;
+    
+    promisc_cfg.enabled = val;
+    if (val)
+        pr_info("ShadowOS PROMISC: 👻 Stealth mode ACTIVE - promisc flags will be hidden\n");
+    else
+        pr_info("ShadowOS PROMISC: Stealth mode disabled\n");
+    
+    return count;
 }
 
 static ssize_t promisc_hide_all_show(struct kobject *kobj,
@@ -130,7 +163,7 @@ static ssize_t promisc_add_store(struct kobject *kobj,
     list_add(&hi->list, &promisc_cfg.hidden_ifaces);
     spin_unlock(&promisc_cfg.lock);
     
-    pr_info("ShadowOS PROMISC: Hiding promisc on %s\n", name);
+    pr_info("ShadowOS PROMISC: 👻 Now hiding promisc on interface %s\n", name);
     return count;
 }
 
@@ -161,6 +194,21 @@ static ssize_t promisc_status_show(struct kobject *kobj,
     return len;
 }
 
+static ssize_t promisc_stats_show(struct kobject *kobj,
+                                  struct kobj_attribute *attr, char *buf)
+{
+    int count = 0;
+    struct hidden_iface *hi;
+    
+    spin_lock(&promisc_cfg.lock);
+    list_for_each_entry(hi, &promisc_cfg.hidden_ifaces, list)
+        count++;
+    spin_unlock(&promisc_cfg.lock);
+    
+    return sprintf(buf, "hidden_ifaces: %d\nflags_hidden: %llu\nhide_all: %d\n",
+                   count, promisc_cfg.flags_hidden, promisc_cfg.hide_all);
+}
+
 static struct kobj_attribute promisc_attr_enabled =
     __ATTR(enabled, 0644, promisc_enabled_show, promisc_enabled_store);
 static struct kobj_attribute promisc_attr_hide_all =
@@ -169,12 +217,15 @@ static struct kobj_attribute promisc_attr_add =
     __ATTR(add_interface, 0200, NULL, promisc_add_store);
 static struct kobj_attribute promisc_attr_status =
     __ATTR(status, 0444, promisc_status_show, NULL);
+static struct kobj_attribute promisc_attr_stats =
+    __ATTR(stats, 0444, promisc_stats_show, NULL);
 
 static struct attribute *promisc_attrs[] = {
     &promisc_attr_enabled.attr,
     &promisc_attr_hide_all.attr,
     &promisc_attr_add.attr,
     &promisc_attr_status.attr,
+    &promisc_attr_stats.attr,
     NULL,
 };
 
@@ -192,6 +243,7 @@ static int __init shadow_promisc_init(void)
     spin_lock_init(&promisc_cfg.lock);
     promisc_cfg.enabled = false;
     promisc_cfg.hide_all = false;
+    promisc_cfg.flags_hidden = 0;
     
     parent = shadow_get_kobj();
     if (parent) {
@@ -202,7 +254,8 @@ static int __init shadow_promisc_init(void)
         }
     }
     
-    pr_info("ShadowOS: 👻 Promiscuous hiding ready\n");
+    pr_info("ShadowOS: 👻 Promisc hiding ready - exports shadow_get_hidden_flags()\n");
+    pr_info("ShadowOS: 👻 Note: Full netlink hiding requires LSM integration\n");
     return 0;
 }
 

@@ -10,7 +10,7 @@
  * - IOMMU enforcement
  * - PCI device filtering
  *
- * Copyright (C) 2024 ShadowOS Project
+ * Copyright (C) 2026 ShadowOS Project
  */
 
 #include <linux/module.h>

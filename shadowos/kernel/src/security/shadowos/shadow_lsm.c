@@ -13,7 +13,7 @@
  * - shadow_honey: Honeytoken file access alerts
  * - shadow_meta: Metadata scrubbing on file close
  *
- * Copyright (C) 2024 ShadowOS Project
+ * Copyright (C) 2026 ShadowOS Project
  */
 
 #define pr_fmt(fmt) "ShadowOS LSM: " fmt

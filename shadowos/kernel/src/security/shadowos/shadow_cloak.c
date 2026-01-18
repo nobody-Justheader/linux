@@ -10,7 +10,7 @@
  * - Invisible to ps, top, htop
  * - Self-protection capability
  *
- * Copyright (C) 2024 ShadowOS Project
+ * Copyright (C) 2026 ShadowOS Project
  */
 
 #include <linux/module.h>

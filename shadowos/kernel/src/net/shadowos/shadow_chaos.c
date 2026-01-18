@@ -3,7 +3,7 @@
  * ShadowOS Protocol Chaos Module
  * Confuses fingerprinting tools by randomizing network parameters
  *
- * Copyright (C) 2024 ShadowOS Project
+ * Copyright (C) 2026 ShadowOS Project
  */
 
 #include <linux/module.h>

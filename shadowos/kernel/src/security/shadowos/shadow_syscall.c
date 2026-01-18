@@ -14,7 +14,7 @@
  * requires deep kernel changes. This module provides the infrastructure
  * for future implementation.
  *
- * Copyright (C) 2024 ShadowOS Project
+ * Copyright (C) 2026 ShadowOS Project
  */
 
 #include <linux/module.h>

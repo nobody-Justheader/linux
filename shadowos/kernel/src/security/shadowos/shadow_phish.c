@@ -10,7 +10,7 @@
  * - Known phishing domain database
  * - DNS query interception for real-time checking
  *
- * Copyright (C) 2024 ShadowOS Project
+ * Copyright (C) 2026 ShadowOS Project
  */
 
 #include <linux/module.h>
