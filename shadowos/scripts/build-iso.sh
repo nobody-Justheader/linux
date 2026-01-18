@@ -1719,35 +1719,36 @@ if [ -f "$SHADOWOS_DIR/assets/boot_logo.png" ]; then
 fi
 
 sudo tee "$BUILD_DIR/iso/boot/grub/grub.cfg" > /dev/null << EOF
-# Load graphics modules first
+# Serial console for debugging - initialize FIRST
+insmod serial
+serial --speed=115200 --unit=0 --word=8 --parity=no --stop=1
+
+# Start with console terminal (guaranteed to work in BIOS mode)
+terminal_input console serial
+terminal_output console serial
+
+set timeout=5
+set default=0
+
+# Try to load graphics modules (optional, non-fatal)
 insmod all_video
 insmod gfxterm
 insmod png
 insmod jpeg
 
-# Set graphics mode
-set gfxmode=1024x768,auto
-set gfxpayload=keep
-
-# Try to load font
-if loadfont /boot/grub/fonts/unicode.pf2; then
-    set have_font=true
+# Try graphics mode only on EFI (more reliable there)
+if [ "\$grub_platform" = "efi" ]; then
+    set gfxmode=1024x768,auto
+    set gfxpayload=keep
+    if loadfont /boot/grub/fonts/unicode.pf2; then
+        terminal_output gfxterm
+    fi
 fi
 
-# Initialize graphics terminal
-terminal_output gfxterm
-
-# Load background image
+# Load background image if in graphics mode
 if [ -f /boot/grub/shadowos-logo.png ]; then
     background_image -m stretch /boot/grub/shadowos-logo.png
 fi
-
-# Serial console for debugging (optional)
-insmod serial
-serial --speed=115200 --unit=0 --word=8 --parity=no --stop=1
-
-set timeout=5
-set default=0
 
 menuentry "ShadowOS Live" {
     linux /boot/vmlinuz boot=live $QUIET_OPTS console=tty0 console=ttyS0,115200n8
