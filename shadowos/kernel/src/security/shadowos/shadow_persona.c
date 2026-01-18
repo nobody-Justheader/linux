@@ -19,6 +19,8 @@
 #include <linux/kobject.h>
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
+#include <linux/rtnetlink.h>
+#include <linux/if_arp.h>
 #include <linux/random.h>
 #include <linux/utsname.h>
 #include <shadowos/shadow_types.h>
