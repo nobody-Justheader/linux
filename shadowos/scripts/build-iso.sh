@@ -1643,6 +1643,42 @@ APTHOOK
 
     log "Generating initramfs..."
 
+    # Create initramfs hook to ensure busybox utilities are available
+    # Live-boot requires sed, tr, grep, etc. for filesystem detection
+    sudo mkdir -p "$ROOTFS/etc/initramfs-tools/hooks"
+    sudo tee "$ROOTFS/etc/initramfs-tools/hooks/live-busybox" > /dev/null << 'BUSYBOX_HOOK'
+#!/bin/sh
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case "$1" in
+    prereqs) prereqs; exit 0;;
+esac
+
+. /usr/share/initramfs-tools/hook-functions
+
+# Copy essential utilities that live-boot needs
+copy_exec /bin/sed /bin
+copy_exec /usr/bin/tr /bin
+copy_exec /bin/grep /bin
+copy_exec /bin/cat /bin
+copy_exec /bin/ls /bin
+copy_exec /bin/mount /bin
+copy_exec /bin/umount /bin
+copy_exec /usr/bin/find /bin
+copy_exec /usr/bin/losetup /sbin
+
+# Ensure busybox is copied
+copy_exec /bin/busybox /bin
+
+# Create busybox symlinks for common utilities
+for util in sed tr grep cat ls mount umount find awk cut head tail wc; do
+    if [ ! -e "${DESTDIR}/bin/$util" ]; then
+        ln -sf busybox "${DESTDIR}/bin/$util" 2>/dev/null || true
+    fi
+done
+BUSYBOX_HOOK
+    sudo chmod +x "$ROOTFS/etc/initramfs-tools/hooks/live-busybox"
+
     # Mount for chroot
     sudo mount --bind /dev "$ROOTFS/dev" || true
     sudo mount --bind /dev/pts "$ROOTFS/dev/pts" || true
