@@ -6,6 +6,8 @@ from .hardware import HardwareTab
 from .storage import StorageTab
 from .privacy import PrivacyTab
 from .offensive import OffensiveTab
+from .crypto import CryptoTab
+from .time import TimeTab
 
 __all__ = [
     'DefenseTab',
@@ -15,5 +17,8 @@ __all__ = [
     'StorageTab',
     'PrivacyTab',
     'OffensiveTab',
+    'CryptoTab',
+    'TimeTab',
 ]
+
 
