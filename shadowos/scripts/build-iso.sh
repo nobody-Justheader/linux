@@ -1108,6 +1108,94 @@ BUILDSCRIPT
         # Let's just run chroot. debootstrap doesn't leave mounts active.
         
         sudo chroot "$ROOTFS" /bin/bash -c "cd /usr/src/shadowos-modules && ./build-modules.sh"
+        
+        # Create modules-load.d configuration to auto-load modules at boot
+        echo "[shadowos] Creating module auto-load configuration..."
+        sudo mkdir -p "$ROOTFS/etc/modules-load.d"
+        sudo tee "$ROOTFS/etc/modules-load.d/shadowos.conf" > /dev/null << 'MODCONF'
+# ShadowOS Security Modules - Auto-load at boot
+# Core modules
+shadow_core
+
+# Network defense modules
+shadow_detect
+shadow_chaos
+shadow_frustrate
+shadow_dns
+shadow_geo
+shadow_fprint
+shadow_mac
+shadow_promisc
+shadow_inject
+shadow_mtd
+shadow_flux
+shadow_phantom
+shadow_decoy
+
+# Security modules
+shadow_cloak
+shadow_debug
+shadow_defcon
+shadow_deny
+shadow_duress
+shadow_escalate
+shadow_honey
+shadow_keylog
+shadow_layers
+shadow_lsm
+shadow_memcrypt
+shadow_osint
+shadow_panic
+shadow_persona
+shadow_phish
+shadow_profile
+shadow_proto
+shadow_ram
+shadow_rootkit
+shadow_shred
+shadow_sign
+shadow_stego
+shadow_synth
+shadow_syscall
+shadow_tamper
+shadow_timelock
+
+# Hardware protection
+shadow_usb
+shadow_av
+shadow_dma
+shadow_bt
+
+# Anti-forensics
+shadow_deadman
+shadow_coldboot
+shadow_meta
+shadow_attrib
+shadow_classify
+shadow_evidence
+shadow_exfil
+shadow_infinite
+shadow_beacon
+shadow_lookalike
+MODCONF
+
+        # Create systemd service for loading modules (in case modules-load.d doesn't work)
+        sudo tee "$ROOTFS/etc/systemd/system/shadowos-modules.service" > /dev/null << 'SVCFILE'
+[Unit]
+Description=ShadowOS Kernel Modules Loader
+After=systemd-modules-load.service
+Before=network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/bash -c 'for mod in /lib/modules/$(uname -r)/updates/*/shadowos/*.ko.xz; do modprobe $(basename "$mod" .ko.xz) 2>/dev/null || true; done'
+
+[Install]
+WantedBy=multi-user.target
+SVCFILE
+
+        sudo chroot "$ROOTFS" systemctl enable shadowos-modules.service 2>/dev/null || true
     else
         echo "[warning] kernel/src not found! Skipping module build."
     fi
