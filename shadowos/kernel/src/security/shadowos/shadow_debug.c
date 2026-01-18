@@ -193,7 +193,7 @@ static ssize_t debug_protect_pid_store(struct kobject *k, struct kobj_attribute 
         return -EINVAL;
     
     rcu_read_lock();
-    task = find_task_by_vpid(pid);
+    task = pid_task(find_vpid(pid), PIDTYPE_PID);
     if (task)
         protect_process(pid, task->comm);
     rcu_read_unlock();

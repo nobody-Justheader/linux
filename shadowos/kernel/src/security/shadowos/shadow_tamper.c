@@ -53,7 +53,7 @@ static struct {
     u64 checks_performed;
     u64 anomalies_found;
     struct hw_fingerprint baseline;
-    struct hw_fingerprint current;
+    struct hw_fingerprint current_fp;
 } tamper_cfg = {
     .enabled = true,
     .fingerprint_valid = false,
@@ -127,24 +127,24 @@ static bool compare_fingerprints(struct hw_fingerprint *a, struct hw_fingerprint
 /* Perform tamper check */
 static void perform_check(void)
 {
-    capture_fingerprint(&tamper_cfg.current);
+    capture_fingerprint(&tamper_cfg.current_fp);
     tamper_cfg.checks_performed++;
     
     if (!tamper_cfg.fingerprint_valid) {
         /* First run - establish baseline */
-        memcpy(&tamper_cfg.baseline, &tamper_cfg.current, sizeof(struct hw_fingerprint));
+        memcpy(&tamper_cfg.baseline, &tamper_cfg.current_fp, sizeof(struct hw_fingerprint));
         tamper_cfg.fingerprint_valid = true;
         pr_info("ShadowOS Tamper: 🔐 Baseline fingerprint captured\n");
         return;
     }
     
     /* Compare with baseline */
-    if (!compare_fingerprints(&tamper_cfg.baseline, &tamper_cfg.current)) {
+    if (!compare_fingerprints(&tamper_cfg.baseline, &tamper_cfg.current_fp)) {
         tamper_cfg.tampering_detected = true;
         tamper_cfg.anomalies_found++;
         pr_warn("ShadowOS Tamper: 🚨 HARDWARE TAMPERING DETECTED!\n");
         pr_warn("ShadowOS Tamper: BIOS changed: %s -> %s\n",
-                tamper_cfg.baseline.bios_version, tamper_cfg.current.bios_version);
+                tamper_cfg.baseline.bios_version, tamper_cfg.current_fp.bios_version);
     }
 }
 

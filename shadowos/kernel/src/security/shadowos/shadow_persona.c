@@ -123,10 +123,9 @@ static int switch_persona(int index)
         dev = next_net_device(dev);
     }
     
-    /* Apply hostname (Note: this affects utsname) */
-    down_write(&uts_sem);
+    /* Apply hostname - note: uts_sem not exported in kernel 6.12+,
+     * hostname change may have race conditions but works for demo */
     strscpy(utsname()->nodename, p->hostname, sizeof(utsname()->nodename));
-    up_write(&uts_sem);
     
     return 0;
 }
@@ -265,10 +264,8 @@ static int __init shadow_persona_init(void)
     }
     
     /* Save original hostname */
-    down_read(&uts_sem);
     strscpy(persona_cfg.original_hostname, utsname()->nodename,
             sizeof(persona_cfg.original_hostname));
-    up_read(&uts_sem);
     
     parent = shadow_get_kobj();
     if (parent) {
@@ -306,10 +303,8 @@ static void __exit shadow_persona_exit(void)
     }
     
     /* Restore original hostname */
-    down_write(&uts_sem);
     strscpy(utsname()->nodename, persona_cfg.original_hostname,
             sizeof(utsname()->nodename));
-    up_write(&uts_sem);
     
     pr_info("ShadowOS: Network Persona unloaded, identity restored\n");
 }

