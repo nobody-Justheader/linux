@@ -139,8 +139,8 @@ static bool should_scrub_file(const char *filename)
     return false;
 }
 
-/* File close notification - called when files are closed */
-static void meta_file_closed(struct file *file)
+/* File close notification - exported for LSM integration */
+void shadow_meta_file_closed(struct file *file)
 {
     struct dentry *dentry;
     struct inode *inode;
@@ -166,6 +166,7 @@ static void meta_file_closed(struct file *file)
     randomize_inode_times(inode);
     meta_cfg.files_scrubbed++;
 }
+EXPORT_SYMBOL_GPL(shadow_meta_file_closed);
 
 /* Sysfs Interface */
 static ssize_t meta_enabled_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)

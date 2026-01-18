@@ -105,13 +105,13 @@ static void trigger_honeytoken(struct honeytoken *ht, const char *path,
         log_accessor_info(task, path);
 }
 
-/* Kprobe for file open - simplified implementation */
-static int honey_check_open(const char *pathname)
+/* Check file open for honeytoken - exported for LSM integration */
+void shadow_honey_check_open(const char *pathname)
 {
     struct honeytoken *ht;
     
     if (!honey_cfg.enabled)
-        return 0;
+        return;
     
     spin_lock(&honey_cfg.lock);
     ht = find_honeytoken(pathname);
@@ -119,9 +119,9 @@ static int honey_check_open(const char *pathname)
         trigger_honeytoken(ht, pathname, "OPEN");
     }
     spin_unlock(&honey_cfg.lock);
-    
-    return 0;  /* Always allow access - we're observing */
 }
+EXPORT_SYMBOL_GPL(shadow_honey_check_open);
+
 
 /* Sysfs Interface */
 static ssize_t honey_enabled_show(struct kobject *kobj, 

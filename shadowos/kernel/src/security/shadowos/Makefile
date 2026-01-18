@@ -1,5 +1,8 @@
 # ShadowOS Security Modules Makefile
 
+# Core: Linux Security Module
+obj-$(CONFIG_SECURITY_SHADOWOS) += shadow_lsm.o
+
 # Phase 4: Hardware Control
 obj-$(CONFIG_SHADOWOS_USB) += shadow_usb.o
 obj-$(CONFIG_SHADOWOS_AV) += shadow_av.o

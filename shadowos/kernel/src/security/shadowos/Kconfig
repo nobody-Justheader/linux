@@ -8,6 +8,14 @@ menuconfig SHADOWOS_SECURITY
 
 if SHADOWOS_SECURITY
 
+config SECURITY_SHADOWOS
+	bool "ShadowOS Linux Security Module"
+	depends on SECURITY
+	default y
+	help
+	  Central LSM providing hooks for automatic interception.
+	  Integrates shadow_av, shadow_cloak, shadow_honey, shadow_meta.
+
 config SHADOWOS_USB
 	bool "USB Firewall"
 	depends on USB
