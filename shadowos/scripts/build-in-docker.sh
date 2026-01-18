@@ -30,6 +30,22 @@ echo "[shadowos] Running build in container..."
 # --privileged is required for mount/chroot operations inside
 # --rm removes container after exit
 # Run the build inside the container
+# Handle --clean argument
+ARGS="$@"
+if [[ "$*" == *"--clean"* ]]; then
+    echo "[shadowos] Cleaning build artifacts..."
+    docker run --rm --privileged \
+        -v "$(pwd):/app" \
+        -e SHADOWOS_DIR=/app \
+        --user root \
+        -w /app \
+        shadowos-builder \
+        make clean
+    
+    # Remove --clean from args to avoid passing it to make iso
+    ARGS="${ARGS/--clean/}"
+fi
+
 docker run --rm --privileged \
     -v "$(pwd):/app" \
     -v "$(pwd)/output:/app/output" \
@@ -37,6 +53,6 @@ docker run --rm --privileged \
     --user root \
     -w /app \
     shadowos-builder \
-    make -j$(nproc) iso "$@"
+    make -j$(nproc) iso $ARGS
 
 echo "[shadowos] Container build finished."

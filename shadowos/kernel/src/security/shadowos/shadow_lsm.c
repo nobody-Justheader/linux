@@ -49,7 +49,11 @@ extern void shadow_honey_check_open(const char *pathname);
 /* shadow_meta - Metadata scrubbing */
 extern void shadow_meta_file_closed(struct file *file);
 
-/* LSM name (kernel 6.1 uses string, not lsm_id struct) */
+/* LSM ID (kernel 6.8+ uses lsm_id struct) */
+static struct lsm_id shadowos_lsmid __lsm_ro_after_init = {
+    .lsm = "shadowos",
+    .id = 0,
+};
 
 /* Statistics */
 static struct {
@@ -169,7 +173,7 @@ static int __init shadowos_lsm_init(void)
     pr_info("🛡️ Initializing ShadowOS LSM\n");
     
     security_add_hooks(shadowos_hooks, ARRAY_SIZE(shadowos_hooks),
-                       "shadowos");
+                       &shadowos_lsmid);
     
     pr_info("🛡️ ShadowOS LSM ACTIVE - %zu hooks registered\n",
             ARRAY_SIZE(shadowos_hooks));

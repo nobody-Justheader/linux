@@ -355,6 +355,66 @@ class ThreatDashboard(Gtk.Window):
 
 
 def main():
+    # Premium Dark Theme (Cyberpunk/Security Style)
+    css = b"""
+    * {
+        color: #e0e0e0;
+    }
+    
+    window {
+        background-color: #1a1b26;
+    }
+    
+    label {
+        color: #a9b1d6;
+        font-family: 'Inter', 'Segoe UI', sans-serif;
+    }
+    
+    button {
+        background-color: #414868;
+        color: #c0caf5;
+        border: none;
+        border-radius: 6px;
+        padding: 5px 12px;
+        font-weight: bold;
+    }
+    
+    button:hover {
+        background-color: #565f89;
+        color: white;
+    }
+    
+    .dim-label {
+        color: #565f89;
+        font-size: 0.85em;
+    }
+    
+    list {
+        background-color: #1a1b26;
+    }
+    
+    row {
+        padding: 8px;
+        border-bottom: 1px solid #24283b;
+    }
+    
+    separator {
+        color: #414868;
+    }
+    """
+    css_provider = Gtk.CssProvider()
+    css_provider.load_from_data(css)
+    Gtk.StyleContext.add_provider_for_screen(
+        Gdk.Screen.get_default() if 'Gdk' in dir() else None,
+        css_provider,
+        Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+    )
+
+    # Force dark theme preference
+    settings = Gtk.Settings.get_default()
+    settings.set_property("gtk-application-prefer-dark-theme", True)
+    settings.set_property("gtk-theme-name", "Adwaita-dark")
+
     dashboard = ThreatDashboard()
     dashboard.connect("destroy", Gtk.main_quit)
     dashboard.show_all()

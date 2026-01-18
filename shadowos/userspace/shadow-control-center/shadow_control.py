@@ -355,10 +355,113 @@ class ShadowControlCenter(Gtk.Window):
 
 
 def main():
-    # Apply CSS
+    # Premium Dark Theme (Cyberpunk/Security Style)
     css = b"""
+    * {
+        color: #e0e0e0;
+    }
+    
+    window {
+        background-color: #1a1b26;
+    }
+    
+    headerbar {
+        background-color: #24283b;
+        border-bottom: 1px solid #414868;
+        min-height: 48px;
+    }
+    
+    headerbar entry,
+    headerbar button {
+        background-color: #414868;
+        color: white;
+        border: none;
+        box-shadow: none;
+    }
+    
+    label {
+        color: #a9b1d6;
+        font-family: 'Inter', 'Segoe UI', sans-serif;
+    }
+    
+    button {
+        background-color: #414868;
+        color: #c0caf5;
+        border: none;
+        border-radius: 6px;
+        padding: 8px 16px;
+        font-weight: bold;
+        transition: all 0.2s;
+    }
+    
+    button:hover {
+        background-color: #565f89;
+        color: white;
+        box-shadow: 0 0 10px rgba(86, 95, 137, 0.5);
+    }
+    
+    button:active {
+        background-color: #7aa2f7;
+        color: #1a1b26;
+    }
+    
+    switch {
+        background-color: #24283b; 
+        border: 1px solid #565f89;
+    }
+    
+    switch:checked {
+        background-color: #7aa2f7; 
+        border-color: #7aa2f7;
+    }
+    
+    switch slider {
+        background-color: #a9b1d6;
+    }
+    
+    .boxed-list {
+        background-color: #24283b;
+        border-radius: 8px;
+        padding: 5px;
+        border: 1px solid #414868;
+    }
+    
+    row {
+        padding: 10px;
+        border-bottom: 1px solid #1a1b26;
+    }
+    
+    row:last-child {
+        border-bottom: none;
+    }
+    
+    row:hover {
+        background-color: #2f3549;
+    }
+
+    /* Status indicators */
+    .dim-label {
+        color: #565f89;
+        font-size: 0.9em;
+    }
+
+    /* Emergency Controls */
     .destructive-action {
-        background: #c33;
+        background-color: #f7768e;
+        color: #1a1b26;
+    }
+    
+    .destructive-action:hover {
+        background-color: #ff9e64;
+    }
+    
+    frame {
+        border: 1px solid #414868;
+        border-radius: 8px;
+    }
+    
+    frame border {
+        border: none;
     }
     """
     css_provider = Gtk.CssProvider()
@@ -368,6 +471,11 @@ def main():
         css_provider,
         Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
     )
+    
+    # Force dark theme preference
+    settings = Gtk.Settings.get_default()
+    settings.set_property("gtk-application-prefer-dark-theme", True)
+    settings.set_property("gtk-theme-name", "Adwaita-dark")
     
     win = ShadowControlCenter()
     win.connect("destroy", Gtk.main_quit)

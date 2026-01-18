@@ -45,7 +45,7 @@ BUILD_DIR="$(realpath -m "${BUILD_DIR:-/tmp/shadowos-build}")"
 OUTPUT="${OUTPUT:-shadowos.iso}"
 
 # Debian configuration
-DEBIAN_RELEASE="bookworm"
+DEBIAN_RELEASE="trixie"
 DEBIAN_MIRROR="http://deb.debian.org/debian"
 
 # Build options
@@ -154,8 +154,8 @@ if [[ "$STAGE" == "rootfs" || "$STAGE" == "all" ]]; then
         sudo debootstrap \
             --arch=amd64 \
             --variant=minbase \
-            --include=sudo,locales,console-setup,linux-image-amd64,live-boot,systemd-sysv \
-            bookworm "$ROOTFS" http://deb.debian.org/debian/
+            --include=sudo,locales,console-setup,linux-image-amd64,linux-headers-amd64,build-essential,live-boot,systemd-sysv \
+            trixie "$ROOTFS" http://deb.debian.org/debian/
         
         log "Debian base installed"
     else
@@ -173,7 +173,7 @@ if [[ "$STAGE" == "rootfs" || "$STAGE" == "all" ]]; then
 
     # Set OS identity
     sudo tee "$ROOTFS/etc/os-release" > /dev/null << 'OSRELEASE'
-PRETTY_NAME="ShadowOS 1.0 (Based on Debian Bookworm)"
+PRETTY_NAME="ShadowOS 1.0 (Based on Debian Trixie)"
 NAME="ShadowOS"
 VERSION_ID="1.0"
 VERSION="1.0"
@@ -188,7 +188,7 @@ OSRELEASE
     # Protect os-release from being overwritten by base-files upgrades
     sudo chroot "$ROOTFS" dpkg-divert --add --rename --divert /etc/os-release.debian /etc/os-release 2>/dev/null || true
     sudo tee "$ROOTFS/etc/os-release" > /dev/null << 'OSRELEASE2'
-PRETTY_NAME="ShadowOS 1.0 (Based on Debian Bookworm)"
+PRETTY_NAME="ShadowOS 1.0 (Based on Debian Trixie)"
 NAME="ShadowOS"
 VERSION_ID="1.0"
 VERSION="1.0"
@@ -216,10 +216,10 @@ EOF
 
     # Configure repositories (Debian + Kali)
     sudo tee "$ROOTFS/etc/apt/sources.list" > /dev/null << 'EOF'
-# Debian Bookworm (base)
-deb http://deb.debian.org/debian bookworm main contrib non-free non-free-firmware
-deb http://deb.debian.org/debian bookworm-updates main contrib non-free non-free-firmware
-deb http://security.debian.org/debian-security bookworm-security main contrib non-free non-free-firmware
+# Debian Trixie (base)
+deb http://deb.debian.org/debian trixie main contrib non-free non-free-firmware
+deb http://deb.debian.org/debian trixie-updates main contrib non-free non-free-firmware
+deb http://security.debian.org/debian-security trixie-security main contrib non-free non-free-firmware
 EOF
 
     # Create Kali setup script (run post-install to enable Kali repos)
@@ -1017,150 +1017,179 @@ if __name__ == "__main__":
         print("Unknown command")
 SHADOWAPI
     sudo chmod +x "$ROOTFS/usr/bin/shadow-api"
+    # =============================================================================
+    # INSTALL REPOSITORY TOOLS (shadow-toolkit, shadow-recon, etc.)
+    # =============================================================================
+    echo "[shadowos] Installing repository tools..."
+    if [ -d "usr/bin" ]; then
+        sudo cp -r usr/bin/* "$ROOTFS/usr/bin/"
+        # Use find to only chmod files that exist, avoiding dangling symlink errors
+        sudo find "$ROOTFS/usr/bin" -type f -exec chmod +x {} +
+    fi
 
-    # Create Shadow Control Center (GUI)
-    sudo tee "$ROOTFS/usr/bin/shadow-control-center" > /dev/null << 'CONTROL'
-#!/usr/bin/env python3
-import gi
-import sys
-import subprocess
-import json
-import threading
-import time
-gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk, Gdk, GLib
-
-# ShadowOS Control Center
-# Robust UI for managing Security, Identity, and Anonymity
-
-class ShadowControl(Gtk.Window):
-    def __init__(self):
-        super().__init__(title="ShadowOS Control Center")
-        self.set_border_width(10)
-        self.set_default_size(600, 450)
-        self.set_position(Gtk.WindowPosition.CENTER)
-        self.set_icon_name("security-high")
-
-        # Main Layout
-        main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-        self.add(main_box)
-
-        # Header
-        header = Gtk.HeaderBar()
-        header.set_show_close_button(True)
-        header.set_title("ShadowOS Active Defense")
-        header.set_subtitle("Control & Command")
-        self.set_titlebar(header)
-
-        # Notebook (Tabs)
-        notebook = Gtk.Notebook()
-        main_box.pack_start(notebook, True, True, 0)
-
-        # --- TAB 1: DEFENSE ---
-        defense_grid = Gtk.Grid()
-        defense_grid.set_column_spacing(20)
-        defense_grid.set_row_spacing(20)
-        defense_grid.set_margin_top(20)
-        defense_grid.set_margin_bottom(20)
-        defense_grid.set_margin_start(20)
-        defense_grid.set_margin_end(20)
-
-        # Chaos Mode
-        lbl_chaos = Gtk.Label(xalign=0)
-        lbl_chaos.set_markup("<b>Chaos Fuzzing</b>\n<small>Randomly drops/rejects/tarpits traffic (Kernel-Level)</small>")
-        self.sw_chaos = Gtk.Switch()
-        self.sw_chaos.connect("state-set", self.on_chaos_toggle)
-        defense_grid.attach(lbl_chaos, 0, 0, 1, 1)
-        defense_grid.attach(self.sw_chaos, 1, 0, 1, 1)
-
-        # Stealth Mode
-        lbl_stealth = Gtk.Label(xalign=0)
-        lbl_stealth.set_markup("<b>Extreme Stealth</b>\n<small>TTL 128, No Timestamps, Ignore ICMP (Windows-like)</small>")
-        self.sw_stealth = Gtk.Switch()
-        self.sw_stealth.connect("state-set", self.on_stealth_toggle)
-        defense_grid.attach(lbl_stealth, 0, 1, 1, 1)
-        defense_grid.attach(self.sw_stealth, 1, 1, 1, 1)
-
-        # Tor Mode
-        lbl_tor = Gtk.Label(xalign=0)
-        lbl_tor.set_markup("<b>Tor Transparent Proxy</b>\n<small>Route all TCP traffic through Tor network</small>")
-        self.sw_tor = Gtk.Switch()
-        self.sw_tor.connect("state-set", self.on_tor_toggle)
-        defense_grid.attach(lbl_tor, 0, 2, 1, 1)
-        defense_grid.attach(self.sw_tor, 1, 2, 1, 1)
-
-        notebook.append_page(defense_grid, Gtk.Label(label="Active Defense"))
-
-        # --- TAB 2: IDENTITY ---
-        idx_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=20)
-        idx_box.set_margin_top(20)
-        idx_box.set_margin_start(20)
-
-        # Polymorph Status
-        poly_box = Gtk.Box(spacing=10)
-        lbl_poly = Gtk.Label(xalign=0)
-        lbl_poly.set_markup("<b>Polymorphic Daemon</b>\n<small>Automatically rotates identity every 60s</small>")
-        self.sw_poly = Gtk.Switch()
-        self.sw_poly.connect("state-set", self.on_poly_toggle)
-        poly_box.pack_start(lbl_poly, True, True, 0)
-        poly_box.pack_start(self.sw_poly, False, False, 0)
-        idx_box.pack_start(poly_box, False, False, 0)
-
-        # Manual Rotation
-        rot_box = Gtk.Box(spacing=10)
-        btn_rot = Gtk.Button(label="Rotate Identity Now")
-        btn_rot.connect("clicked", self.on_rotate_click)
-        self.lbl_id = Gtk.Label(label="Current Identity: Unknown")
-        rot_box.pack_start(btn_rot, False, False, 0)
-        rot_box.pack_start(self.lbl_id, False, False, 0)
-        idx_box.pack_start(rot_box, False, False, 0)
-
-        notebook.append_page(idx_box, Gtk.Label(label="Identity"))
-
-        # --- UPDATE UI ---
-        self.update_ui()
+    # =============================================================================
+    # COMPILE & INSTALL SHADOWOS KERNEL MODULES
+    # =============================================================================
+    if [ -d "kernel/src" ]; then
+        echo "[shadowos] Preparing ShadowOS kernel modules..."
+        # Copy kernel source to rootfs
+        sudo mkdir -p "$ROOTFS/usr/src/shadowos-modules"
+        sudo cp -r kernel/src/* "$ROOTFS/usr/src/shadowos-modules/"
         
-        # Start timer for status updates
-        GLib.timeout_add_seconds(5, self.update_ui)
+        # Create a build script to run inside chroot
+        sudo tee "$ROOTFS/usr/src/shadowos-modules/build-modules.sh" > /dev/null << 'BUILDSCRIPT'
+#!/bin/bash
+set -e
 
-    def run_api(self, cmd):
-        subprocess.run(f"shadow-api {cmd}", shell=True)
+# Find kernel headers
+KVER=$(ls /lib/modules | sort -V | tail -n1)
+KDIR="/lib/modules/$KVER/build"
 
-    def update_ui(self):
-        try:
-            res = subprocess.check_output("shadow-api status", shell=True)
-            status = json.loads(res)
-            
-            self.sw_chaos.set_active(status.get("chaos_mode", False))
-            self.sw_stealth.set_active(status.get("stealth_mode", False))
-            self.sw_poly.set_active(status.get("polymorph", False))
-            self.lbl_id.set_label(f"Current Identity: {status.get('identity', 'Unknown')}")
-            # Tor check future implementation
-        except:
-            pass
-        return True
+echo "[shadowos-build] compiling modules for kernel $KVER"
 
-    def on_chaos_toggle(self, switch, state):
-        self.run_api(f"chaos {'on' if state else 'off'}")
+# Create top-level Makefile
+cat > Makefile << 'EOF'
+obj-m += net/shadowos/
+obj-m += security/shadowos/
+
+ccflags-y := -I$(src)/include
+
+all:
+	make -C KERNEL_DIR M=$(PWD) modules
+
+install:
+	make -C KERNEL_DIR M=$(PWD) modules_install
+EOF
+
+# Fix KDIR in Makefile
+sed -i "s|KERNEL_DIR|$KDIR|g" Makefile
+
+# Create subdirectory Makefiles to include all object files
+for dir in net/shadowos security/shadowos; do
+    echo "[shadowos-build] Generating Makefile for $dir"
+    # Create Makefile that adds all .c files as objects
+    # We use wildcard to find them, then convert .c to .o
+    # Note: This runs in make, so we use make syntax
+    cat > "$dir/Makefile" << 'SUBMAKE'
+# Force build all files in this directory as a single module or individual modules?
+# We want individual modules for granular control
+
+# Convert all .c files to .o
+src_files := $(wildcard $(src)/*.c)
+obj_files := $(src_files:$(src)/%.c=%.o)
+
+# define modules
+obj-m := $(obj_files)
+
+ccflags-y := -I$(src)/../../include
+SUBMAKE
+done
+
+# Compile
+echo "[shadowos-build] Starting compilation..."
+make
+
+# Install
+echo "[shadowos-build] Installing modules..."
+make install
+depmod -a "$KVER"
+
+echo "[shadowos-build] Module build complete."
+BUILDSCRIPT
+
+        sudo chmod +x "$ROOTFS/usr/src/shadowos-modules/build-modules.sh"
         
-    def on_stealth_toggle(self, switch, state):
-        self.run_api(f"stealth {'on' if state else 'off'}")
+        # Run compilation in chroot
+        echo "[shadowos] Running module compilation in rootfs..."
+        # We need to bind mount /dev /sys /proc for some build tools? usually not needed for pure make but good practice
+        # build-iso.sh might already have them mounted? No, early cleanup.
+        # But we are inside the main build loop, so mounts might be active if we are careful.
+        # Actually build-iso.sh doesn't mount them for the main phase? 
+        # Let's just run chroot. debootstrap doesn't leave mounts active.
         
-    def on_tor_toggle(self, switch, state):
-        self.run_api(f"tor {'on' if state else 'off'}")
+        sudo chroot "$ROOTFS" /bin/bash -c "cd /usr/src/shadowos-modules && ./build-modules.sh"
+    else
+        echo "[warning] kernel/src not found! Skipping module build."
+    fi
+
+    # =============================================================================
+    # COMPILE & INSTALL LIBSHADOW (REQUIRED DEPENDENCY)
+    # =============================================================================
+    echo "[shadowos] Compiling libshadow..."
+    if [ -d "userspace/libshadow" ]; then
+        # Compile libshadow (ensure gcc/make available or cross-compile logic)
+        # For simplicity, we assume build environment matches target or simple C code
+        (cd userspace/libshadow && make clean && make)
         
-    def on_poly_toggle(self, switch, state):
-        self.run_api(f"polymorph {'on' if state else 'off'}")
+        # Install library
+        sudo cp userspace/libshadow/libshadow.so "$ROOTFS/usr/lib/"
+        sudo cp userspace/libshadow/shadow.h "$ROOTFS/usr/include/"
+        sudo ldconfig -r "$ROOTFS" || true
+    else
+        echo "[warning] userspace/libshadow not found!"
+    fi
 
-    def on_rotate_click(self, btn):
-        self.run_api("rotate")
-        self.update_ui()
+    # =============================================================================
+    # INSTALL SHADOW DASHBOARD
+    # =============================================================================
+    echo "[shadowos] Installing Shadow Dashboard..."
+    if [ -d "userspace/shadow-dashboard" ]; then
+        sudo mkdir -p "$ROOTFS/usr/share/shadow-dashboard"
+        sudo cp -r userspace/shadow-dashboard/* "$ROOTFS/usr/share/shadow-dashboard/"
+        
+        # Wrapper
+        sudo tee "$ROOTFS/usr/bin/shadow-dashboard" > /dev/null << 'WRAPPER'
+#!/bin/sh
+cd /usr/share/shadow-dashboard
+exec python3 shadow_dashboard.py "$@"
+WRAPPER
+        sudo chmod +x "$ROOTFS/usr/bin/shadow-dashboard"
+        
+        # Desktop Entry
+        sudo tee "$ROOTFS/usr/share/applications/shadow-dashboard.desktop" > /dev/null << 'DESKTOP'
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Shadow Dashboard
+Comment=Threat Intelligence Dashboard
+Exec=shadow-dashboard
+Icon=utilities-system-monitor
+Categories=ShadowOS;System;Monitor;
+Terminal=false
+DESKTOP
+    fi
 
-win = ShadowControl()
-win.connect("destroy", Gtk.main_quit)
-win.show_all()
-Gtk.main()
-CONTROL
+    # =============================================================================
+    # INSTALL SHADOW ALERT DAEMON
+    # =============================================================================
+    echo "[shadowos] Installing Shadow Alert Daemon..."
+    if [ -d "userspace/shadow-alertd" ]; then
+        sudo mkdir -p "$ROOTFS/usr/share/shadow-alertd"
+        sudo cp -r userspace/shadow-alertd/* "$ROOTFS/usr/share/shadow-alertd/"
+        
+        # Service wrapper or just binary
+        sudo tee "$ROOTFS/usr/bin/shadow-alertd" > /dev/null << 'WRAPPER'
+#!/bin/sh
+cd /usr/share/shadow-alertd
+exec python3 shadow_alertd.py "$@"
+WRAPPER
+        sudo chmod +x "$ROOTFS/usr/bin/shadow-alertd"
+    fi
+
+    # =============================================================================
+    # INSTALL SHADOW CONTROL CENTER
+    # =============================================================================
+    # Install Shadow Control Center from userspace
+    echo "[shadowos] Installing Shadow Control Center..."
+    sudo mkdir -p "$ROOTFS/usr/share/shadow-control-center"
+    sudo cp -r userspace/shadow-control-center/* "$ROOTFS/usr/share/shadow-control-center/"
+    
+    # Create executable wrapper
+    sudo tee "$ROOTFS/usr/bin/shadow-control-center" > /dev/null << 'WRAPPER'
+#!/bin/sh
+cd /usr/share/shadow-control-center
+exec python3 shadow_control.py "$@"
+WRAPPER
     sudo chmod +x "$ROOTFS/usr/bin/shadow-control-center"
 
     # Create Desktop Entry for Control Center
