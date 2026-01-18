@@ -263,13 +263,11 @@ static int shadow_nl_stats_get(struct sk_buff *skb, struct genl_info *info)
 static const struct genl_ops shadow_genl_ops[] = {
     {
         .cmd = SHADOW_CMD_CONFIG_GET,
-        .validate = GENL_DONT_VALIDATE_STRICT,
         .doit = shadow_nl_config_get,
         .flags = 0,
     },
     {
         .cmd = SHADOW_CMD_STATS_GET,
-        .validate = GENL_DONT_VALIDATE_STRICT,
         .doit = shadow_nl_stats_get,
         .flags = 0,
     },
