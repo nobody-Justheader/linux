@@ -86,7 +86,7 @@ static int rotate_mac(struct net_device *dev)
     sa->sa_family = dev->type;
     
     rtnl_lock();
-    ret = dev_set_mac_address(dev, &ss, NULL);
+    ret = dev_set_mac_address(dev, sa, NULL);
     rtnl_unlock();
     
     if (ret == 0) {
