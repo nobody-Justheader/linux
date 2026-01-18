@@ -265,18 +265,43 @@ static const struct genl_ops shadow_genl_ops[] = {
         .cmd = SHADOW_CMD_CONFIG_GET,
         .validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
         .doit = shadow_nl_config_get,
+        .flags = 0,
     },
     {
         .cmd = SHADOW_CMD_STATS_GET,
         .validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
         .doit = shadow_nl_stats_get,
+        .flags = 0,
     },
+};
+
+/* Netlink Attribute Policy */
+static const struct nla_policy shadow_genl_policy[SHADOW_ATTR_MAX + 1] = {
+    [SHADOW_ATTR_ALERT_ID]       = { .type = NLA_U32 },
+    [SHADOW_ATTR_ALERT_TYPE]     = { .type = NLA_U8 },
+    [SHADOW_ATTR_ALERT_SEVERITY] = { .type = NLA_U8 },
+    [SHADOW_ATTR_TIMESTAMP]      = { .type = NLA_U64 },
+    [SHADOW_ATTR_SRC_IP]         = { .type = NLA_U32 },
+    [SHADOW_ATTR_DST_IP]         = { .type = NLA_U32 },
+    [SHADOW_ATTR_SRC_PORT]       = { .type = NLA_U16 },
+    [SHADOW_ATTR_DST_PORT]       = { .type = NLA_U16 },
+    [SHADOW_ATTR_PACKET_COUNT]   = { .type = NLA_U32 },
+    [SHADOW_ATTR_PORTS_COUNT]    = { .type = NLA_U32 },
+    [SHADOW_ATTR_SCAN_TYPE]      = { .type = NLA_NUL_STRING, .len = 32 },
+    [SHADOW_ATTR_ACTION]         = { .type = NLA_NUL_STRING, .len = 64 },
+    [SHADOW_ATTR_DETAILS]        = { .type = NLA_NUL_STRING, .len = 256 },
+    [SHADOW_ATTR_MODULE]         = { .type = NLA_NUL_STRING, .len = 32 },
+    [SHADOW_ATTR_ENABLED]        = { .type = NLA_U8 },
+    [SHADOW_ATTR_CONFIG_KEY]     = { .type = NLA_NUL_STRING, .len = 64 },
+    [SHADOW_ATTR_CONFIG_VALUE]   = { .type = NLA_NUL_STRING, .len = 256 },
+    [SHADOW_ATTR_STATS]          = { .type = NLA_U64 },
 };
 
 static struct genl_family shadow_genl_family __ro_after_init = {
     .name = SHADOW_GENL_NAME,
     .version = SHADOW_GENL_VERSION,
     .maxattr = SHADOW_ATTR_MAX,
+    .policy = shadow_genl_policy,
     .module = THIS_MODULE,
     .ops = shadow_genl_ops,
     .n_ops = ARRAY_SIZE(shadow_genl_ops),
