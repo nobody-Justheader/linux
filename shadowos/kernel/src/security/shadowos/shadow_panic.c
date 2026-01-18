@@ -30,6 +30,7 @@ MODULE_VERSION(SHADOWOS_VERSION);
 
 /* Forward declarations */
 extern struct kobject *shadow_get_kobj(void);
+extern int shadow_shred_file(const char *path);
 extern void shadow_scrub_memory(void *addr, size_t size);
 
 /* Key codes for default combo: Ctrl+Alt+Shift+P+P */
@@ -69,10 +70,14 @@ static void execute_panic_wipe(void)
     
     pr_emerg("ShadowOS: 🚨 PANIC BUTTON TRIGGERED - EMERGENCY WIPE INITIATED!\n");
     
-    /* Destroy encryption keys first */
+    /* Destroy encryption keys / critical files first */
     if (panic_cfg.destroy_keys) {
-        pr_emerg("ShadowOS: Destroying encryption keys...\n");
-        /* Would call crypto_destroy_all_tfms() equivalent */
+        pr_emerg("ShadowOS: Destroying critical system files and encryption keys...\n");
+        /* Target critical secrets */
+        shadow_shred_file("/etc/shadow");
+        shadow_shred_file("/etc/passwd");
+        shadow_shred_file("/etc/hostname");
+        /* Note: In a real scenario, this would target the LUKS header block device */
     }
     
     /* Wipe RAM */

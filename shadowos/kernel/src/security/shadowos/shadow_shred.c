@@ -77,7 +77,7 @@ static void fill_random(char *buf, size_t len)
 }
 
 /* Shred a file by path - core implementation */
-static int shred_file_path(const char *path)
+int shadow_shred_file(const char *path)
 {
     struct file *filp;
     char *buf;
@@ -142,6 +142,7 @@ out:
     kfree(buf);
     return ret;
 }
+EXPORT_SYMBOL_GPL(shadow_shred_file);
 
 /* Shred memory region - for sensitive data in RAM */
 void shadow_shred_memory(void *addr, size_t size)
@@ -207,7 +208,7 @@ static ssize_t shred_trigger_store(struct kobject *kobj, struct kobj_attribute *
     if (len > 0 && path[len - 1] == '\n')
         path[--len] = '\0';
     
-    if (shred_file_path(path) < 0)
+    if (shadow_shred_file(path) < 0)
         return -EIO;
     
     return count;
