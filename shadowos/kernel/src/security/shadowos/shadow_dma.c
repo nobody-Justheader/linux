@@ -53,12 +53,14 @@ static struct {
 /* Check if device is DMA-capable and potentially dangerous */
 static bool is_dma_threat(struct pci_dev *pdev)
 {
-    /* Thunderbolt controllers */
-    if (pdev->class == PCI_CLASS_SERIAL_THUNDERBOLT)
+    /* Thunderbolt controllers (Intel, Apple) - check by vendor ID and class */
+    /* Thunderbolt typically uses PCI_CLASS_SYSTEM_OTHER (0x0880) */
+    if ((pdev->vendor == 0x8086 || pdev->vendor == 0x106b) &&  /* Intel or Apple */
+        (pdev->class >> 8) == (PCI_CLASS_SYSTEM_OTHER >> 8))
         return dma_cfg.block_thunderbolt;
     
     /* FireWire (IEEE 1394) controllers */
-    if (pdev->class >> 8 == PCI_CLASS_SERIAL_FIREWIRE >> 8)
+    if ((pdev->class >> 8) == (PCI_CLASS_SERIAL_FIREWIRE >> 8))
         return dma_cfg.block_firewire;
     
     /* External GPUs and other hotplug devices */
