@@ -1656,24 +1656,38 @@ esac
 
 . /usr/share/initramfs-tools/hook-functions
 
-# Copy essential utilities that live-boot needs
-copy_exec /bin/sed /bin
-copy_exec /usr/bin/tr /bin
-copy_exec /bin/grep /bin
-copy_exec /bin/cat /bin
-copy_exec /bin/ls /bin
-copy_exec /bin/mount /bin
-copy_exec /bin/umount /bin
-copy_exec /usr/bin/find /bin
-copy_exec /usr/bin/losetup /sbin
-
-# Ensure busybox is copied
+# Ensure busybox is copied first
 copy_exec /bin/busybox /bin
 
-# Create busybox symlinks for common utilities
-for util in sed tr grep cat ls mount umount find awk cut head tail wc; do
+# Copy coreutils and essential utilities that live-boot needs
+for bin in /bin/sed /usr/bin/tr /bin/grep /bin/egrep /bin/fgrep \
+           /bin/cat /bin/ls /bin/mount /bin/umount /bin/mkdir /bin/rmdir \
+           /bin/cp /bin/mv /bin/rm /bin/ln /bin/chmod /bin/chown \
+           /bin/dd /bin/df /bin/touch /bin/date /bin/sleep /bin/sync \
+           /usr/bin/find /usr/bin/basename /usr/bin/dirname /usr/bin/id \
+           /usr/bin/cut /usr/bin/head /usr/bin/tail /usr/bin/wc \
+           /usr/bin/sort /usr/bin/uniq /usr/bin/tee /usr/bin/xargs \
+           /usr/bin/expr /usr/bin/test /usr/bin/stat /usr/bin/readlink \
+           /usr/bin/realpath /usr/bin/env /usr/bin/printf /usr/bin/seq \
+           /sbin/losetup /sbin/blkid /sbin/blockdev; do
+    if [ -e "$bin" ]; then
+        copy_exec "$bin" "$(dirname $bin)" 2>/dev/null || true
+    fi
+done
+
+# Create busybox symlinks for all common utilities
+# This ensures utilities are available even if copy_exec fails
+for util in sed tr grep egrep fgrep cat ls mount umount mkdir rmdir \
+            cp mv rm ln chmod chown dd df touch date sleep sync \
+            find basename dirname id cut head tail wc sort uniq tee \
+            xargs expr test stat readlink realpath env printf seq \
+            awk sh ash echo true false yes pwd whoami uname hostname \
+            losetup blkid blockdev modprobe insmod depmod; do
     if [ ! -e "${DESTDIR}/bin/$util" ]; then
         ln -sf busybox "${DESTDIR}/bin/$util" 2>/dev/null || true
+    fi
+    if [ ! -e "${DESTDIR}/sbin/$util" ]; then
+        ln -sf ../bin/busybox "${DESTDIR}/sbin/$util" 2>/dev/null || true
     fi
 done
 BUSYBOX_HOOK
