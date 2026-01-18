@@ -7,7 +7,7 @@
  * Features:
  * - Multi-pass overwrite (DoD 5220.22-M compliant)
  * - Filename obfuscation before deletion
- * - Free space wiping
+ * - Block-level wiping
  * - SSD TRIM-aware secure delete
  *
  * Copyright (C) 2024 ShadowOS Project
@@ -20,6 +20,8 @@
 #include <linux/sysfs.h>
 #include <linux/kobject.h>
 #include <linux/random.h>
+#include <linux/slab.h>
+#include <linux/uaccess.h>
 #include <shadowos/shadow_types.h>
 
 /* Module Info */
@@ -30,6 +32,9 @@ MODULE_VERSION(SHADOWOS_VERSION);
 
 /* Forward declaration */
 extern struct kobject *shadow_get_kobj(void);
+
+/* Shred buffer size */
+#define SHRED_BUF_SIZE 4096
 
 /* DoD 5220.22-M overwrite patterns */
 static const u8 shred_patterns[] = {
@@ -51,7 +56,7 @@ static struct {
     u64 files_shredded;
     u64 bytes_shredded;
 } shred_cfg = {
-    .enabled = false,
+    .enabled = true,
     .passes = 3,
     .obfuscate_name = true,
     .verify_overwrite = false,
@@ -59,56 +64,103 @@ static struct {
     .bytes_shredded = 0,
 };
 
-/*
- * Secure overwrite buffer with pattern
- * In production, this would hook into VFS unlink
- */
-static int shred_fill_pattern(char *buf, size_t len, u8 pattern)
+/* Fill buffer with pattern */
+static void fill_pattern(char *buf, size_t len, u8 pattern)
 {
     memset(buf, pattern, len);
-    return 0;
 }
 
-static int shred_fill_random(char *buf, size_t len)
+/* Fill buffer with random data */
+static void fill_random(char *buf, size_t len)
 {
     get_random_bytes(buf, len);
-    return 0;
 }
 
-/*
- * Shred a memory region (for demonstration)
- * Real implementation would operate on file blocks
- */
-/* Memory shredding - called from secure delete hooks */
-__maybe_unused
-static void shred_memory(void *addr, size_t size)
+/* Shred a file by path - core implementation */
+static int shred_file_path(const char *path)
 {
+    struct file *filp;
+    char *buf;
+    loff_t file_size, pos;
     int pass;
-    char *buf = addr;
+    ssize_t written;
+    int ret = 0;
     
-    for (pass = 0; pass < shred_cfg.passes && pass < ARRAY_SIZE(shred_patterns); pass++) {
-        shred_fill_pattern(buf, size, shred_patterns[pass]);
-        wmb();
+    buf = kmalloc(SHRED_BUF_SIZE, GFP_KERNEL);
+    if (!buf)
+        return -ENOMEM;
+    
+    /* Open file for writing */
+    filp = filp_open(path, O_WRONLY, 0);
+    if (IS_ERR(filp)) {
+        pr_warn("ShadowOS Shred: Cannot open %s: %ld\n", path, PTR_ERR(filp));
+        kfree(buf);
+        return PTR_ERR(filp);
     }
-    shred_fill_random(buf, size);
-    wmb();
-}
-
-/*
- * Trigger manual shred via sysfs
- * Write a path to shred it
- */
-static ssize_t shred_trigger_store(struct kobject *kobj, struct kobj_attribute *attr, 
-                                   const char *buf, size_t count)
-{
-    pr_info("ShadowOS Shred: 🔥 Secure delete requested for: %.*s\n", 
-            (int)(count > 64 ? 64 : count), buf);
-    pr_info("ShadowOS Shred: Would perform %d-pass overwrite with verification=%d\n",
-            shred_cfg.passes, shred_cfg.verify_overwrite);
+    
+    file_size = i_size_read(file_inode(filp));
+    
+    pr_info("ShadowOS Shred: 🔥 Shredding %s (%lld bytes, %d passes)\n",
+            path, file_size, shred_cfg.passes);
+    
+    /* Perform overwrite passes */
+    for (pass = 0; pass < shred_cfg.passes && pass < ARRAY_SIZE(shred_patterns); pass++) {
+        pos = 0;
+        
+        while (pos < file_size) {
+            size_t chunk = min((size_t)(file_size - pos), (size_t)SHRED_BUF_SIZE);
+            
+            /* Alternate between pattern and random */
+            if (pass == shred_cfg.passes - 1) {
+                fill_random(buf, chunk);
+            } else {
+                fill_pattern(buf, chunk, shred_patterns[pass]);
+            }
+            
+            written = kernel_write(filp, buf, chunk, &pos);
+            if (written < 0) {
+                pr_err("ShadowOS Shred: Write error: %zd\n", written);
+                ret = written;
+                goto out;
+            }
+        }
+        
+        /* Sync to disk after each pass */
+        vfs_fsync(filp, 0);
+        
+        pr_debug("ShadowOS Shred: Pass %d complete for %s\n", pass + 1, path);
+    }
     
     shred_cfg.files_shredded++;
-    return count;
+    shred_cfg.bytes_shredded += file_size;
+    
+    pr_info("ShadowOS Shred: 🔥 SHREDDED %s (%d passes, verified=%d)\n",
+            path, shred_cfg.passes, shred_cfg.verify_overwrite);
+    
+out:
+    filp_close(filp, NULL);
+    kfree(buf);
+    return ret;
 }
+
+/* Shred memory region - for sensitive data in RAM */
+void shadow_shred_memory(void *addr, size_t size)
+{
+    int pass;
+    
+    if (!addr || size == 0)
+        return;
+    
+    for (pass = 0; pass < min(shred_cfg.passes, 3); pass++) {
+        if (pass == 2) {
+            get_random_bytes(addr, size);
+        } else {
+            memset(addr, shred_patterns[pass], size);
+        }
+        wmb();  /* Memory barrier to ensure write is not optimized out */
+    }
+}
+EXPORT_SYMBOL_GPL(shadow_shred_memory);
 
 /* Sysfs Interface */
 static struct kobject *shred_kobj;
@@ -143,10 +195,29 @@ static ssize_t shred_passes_store(struct kobject *kobj, struct kobj_attribute *a
     return count;
 }
 
+/* Shred file by path */
+static ssize_t shred_trigger_store(struct kobject *kobj, struct kobj_attribute *attr, 
+                                   const char *buf, size_t count)
+{
+    char path[256];
+    int len = min(count, sizeof(path) - 1);
+    
+    memcpy(path, buf, len);
+    path[len] = '\0';
+    if (len > 0 && path[len - 1] == '\n')
+        path[--len] = '\0';
+    
+    if (shred_file_path(path) < 0)
+        return -EIO;
+    
+    return count;
+}
+
 static ssize_t shred_stats_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
 {
-    return sprintf(buf, "files_shredded: %llu\nbytes_shredded: %llu\npasses: %d\n",
-                   shred_cfg.files_shredded, shred_cfg.bytes_shredded, shred_cfg.passes);
+    return sprintf(buf, "files_shredded: %llu\nbytes_shredded: %llu\npasses: %d\nverify: %d\n",
+                   shred_cfg.files_shredded, shred_cfg.bytes_shredded, 
+                   shred_cfg.passes, shred_cfg.verify_overwrite);
 }
 
 static struct kobj_attribute shred_attr_enabled = __ATTR(enabled, 0644, shred_enabled_show, shred_enabled_store);
