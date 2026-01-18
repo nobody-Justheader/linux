@@ -117,25 +117,35 @@ static unsigned int shadow_detect_hook(void *priv,
                                      const struct nf_hook_state *state)
 {
     struct iphdr *iph;
-    struct tcphdr *tcph = NULL;
-    struct udphdr *udph = NULL;
+    struct tcphdr _tcph, *tcph = NULL;
+    struct udphdr _udph, *udph = NULL;
     struct shadow_source_track *t;
     unsigned long flags;
     __be32 src_ip;
     u16 dest_port = 0;
     u8 tcp_flags = 0;
+    unsigned int iph_len;
     
     if (!detect_enabled)
+        return NF_ACCEPT;
+    
+    /* In PRE_ROUTING, need to check if we have enough data */
+    if (!pskb_may_pull(skb, sizeof(struct iphdr)))
         return NF_ACCEPT;
         
     iph = ip_hdr(skb);
     if (!iph)
         return NF_ACCEPT;
+    
+    iph_len = iph->ihl * 4;
+    if (iph_len < sizeof(struct iphdr))
+        return NF_ACCEPT;
         
     src_ip = iph->saddr;
     
     if (iph->protocol == IPPROTO_TCP) {
-        tcph = tcp_hdr(skb);
+        /* Use skb_header_pointer for safe access in PRE_ROUTING */
+        tcph = skb_header_pointer(skb, iph_len, sizeof(_tcph), &_tcph);
         if (!tcph) return NF_ACCEPT;
         dest_port = ntohs(tcph->dest);
         
@@ -145,7 +155,7 @@ static unsigned int shadow_detect_hook(void *priv,
         if (tcph->fin) tcp_flags |= 0x01;
         
     } else if (iph->protocol == IPPROTO_UDP) {
-        udph = udp_hdr(skb);
+        udph = skb_header_pointer(skb, iph_len, sizeof(_udph), &_udph);
         if (!udph) return NF_ACCEPT;
         dest_port = ntohs(udph->dest);
     } else {
