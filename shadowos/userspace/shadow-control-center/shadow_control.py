@@ -8,7 +8,7 @@ Copyright (C) 2024 ShadowOS Project
 
 import gi
 gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk, GLib, Gio
+from gi.repository import Gtk, Gdk, GLib, Gio
 import os
 import threading
 
@@ -466,11 +466,15 @@ def main():
     """
     css_provider = Gtk.CssProvider()
     css_provider.load_from_data(css)
-    Gtk.StyleContext.add_provider_for_screen(
-        Gdk.Screen.get_default() if 'Gdk' in dir() else None,
-        css_provider,
-        Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
-    )
+    
+    # Apply CSS to screen (with null check for headless environments)
+    screen = Gdk.Screen.get_default()
+    if screen is not None:
+        Gtk.StyleContext.add_provider_for_screen(
+            screen,
+            css_provider,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
     
     # Force dark theme preference
     settings = Gtk.Settings.get_default()
