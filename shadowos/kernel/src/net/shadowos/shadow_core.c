@@ -263,13 +263,13 @@ static int shadow_nl_stats_get(struct sk_buff *skb, struct genl_info *info)
 static const struct genl_ops shadow_genl_ops[] = {
     {
         .cmd = SHADOW_CMD_CONFIG_GET,
-        .validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
+        .validate = GENL_DONT_VALIDATE_STRICT,
         .doit = shadow_nl_config_get,
         .flags = 0,
     },
     {
         .cmd = SHADOW_CMD_STATS_GET,
-        .validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
+        .validate = GENL_DONT_VALIDATE_STRICT,
         .doit = shadow_nl_stats_get,
         .flags = 0,
     },
@@ -341,7 +341,7 @@ static int __init shadow_core_init(void)
 
     rc = genl_register_family(&shadow_genl_family);
     if (rc) {
-        pr_err("ShadowOS: Failed to register netlink family\n");
+        pr_err("ShadowOS: Failed to register netlink family (err=%d)\n", rc);
         sysfs_remove_group(shadow_state.kobj, &shadow_attr_group);
         kobject_put(shadow_state.kobj);
         kobject_put(shadow_kobj_root);
